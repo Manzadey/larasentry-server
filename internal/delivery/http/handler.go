@@ -1,22 +1,33 @@
-package main
+package http
 
 import (
-	"database/sql"
 	"encoding/json"
 	"log"
 	"net"
 	"net/http"
+	"server/internal/domain"
 	"strings"
 )
 
 type APIHandler struct {
-	db         *sql.DB
-	eventChan  chan IncomingEvent
-	allowedIPs []string
+	projectRepo  domain.ProjectRepository
+	incidentRepo domain.IncidentRepository
+	eventChan    chan domain.IncomingEvent
+	allowedIPs   []string
 }
 
-func NewAPIHandler(db *sql.DB, eventChan chan IncomingEvent, allowedIPs []string) *APIHandler {
-	return &APIHandler{db: db, eventChan: eventChan, allowedIPs: allowedIPs}
+func NewAPIHandler(
+	projectRepo domain.ProjectRepository,
+	incidentRepo domain.IncidentRepository,
+	eventChan chan domain.IncomingEvent,
+	allowedIPs []string,
+) *APIHandler {
+	return &APIHandler{
+		projectRepo:  projectRepo,
+		incidentRepo: incidentRepo,
+		eventChan:    eventChan,
+		allowedIPs:   allowedIPs,
+	}
 }
 
 func getClientIP(r *http.Request) string {
@@ -33,6 +44,20 @@ func getClientIP(r *http.Request) string {
 	return ip
 }
 
+// HandleEvent godoc
+// @Summary Send a new error event
+// @Description Receives an exception/error payload from a Laravel application.
+// @Tags events
+// @Accept  json
+// @Produce  json
+// @Security Bearer
+// @Param payload body domain.EventPayload true "Event Payload"
+// @Success 202 {object} map[string]string
+// @Failure 400 {string} string "Bad Request"
+// @Failure 401 {string} string "Unauthorized"
+// @Failure 403 {string} string "Forbidden"
+// @Failure 405 {string} string "Method Not Allowed"
+// @Router /api/events [post]
 func (h *APIHandler) HandleEvent(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
 		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
@@ -54,7 +79,6 @@ func (h *APIHandler) HandleEvent(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	// 1. Auth via API Key (Authorization: Bearer <token>)
 	authHeader := r.Header.Get("Authorization")
 	if authHeader == "" || !strings.HasPrefix(authHeader, "Bearer ") {
 		http.Error(w, "Unauthorized", http.StatusUnauthorized)
@@ -62,33 +86,24 @@ func (h *APIHandler) HandleEvent(w http.ResponseWriter, r *http.Request) {
 	}
 	apiKey := strings.TrimPrefix(authHeader, "Bearer ")
 
-	// 2. Fetch Project ID
-	var projectID int64
-	err := h.db.QueryRow("SELECT id FROM projects WHERE api_key = ?", apiKey).Scan(&projectID)
+	projectID, err := h.projectRepo.GetIDByKey(r.Context(), apiKey)
 	if err != nil {
-		if err == sql.ErrNoRows {
-			http.Error(w, "Unauthorized - Invalid API Key", http.StatusUnauthorized)
-			return
-		}
-		http.Error(w, "Internal Server Error", http.StatusInternalServerError)
+		http.Error(w, "Unauthorized - Invalid API Key", http.StatusUnauthorized)
 		return
 	}
 
-	// 3. Decode Payload
-	var payload EventPayload
+	var payload domain.EventPayload
 	if err := json.NewDecoder(r.Body).Decode(&payload); err != nil {
 		http.Error(w, "Bad Request - Invalid JSON", http.StatusBadRequest)
 		return
 	}
 
-	// Validate minimal requirements
 	if payload.ExceptionClass == "" || payload.Message == "" {
 		http.Error(w, "Bad Request - Missing exception_class or message", http.StatusBadRequest)
 		return
 	}
 
-	// 4. Send to Processor Channel (Non-blocking for the client request)
-	h.eventChan <- IncomingEvent{
+	h.eventChan <- domain.IncomingEvent{
 		ProjectID:  projectID,
 		ProjectKey: apiKey,
 		Payload:    payload,
@@ -101,13 +116,23 @@ func (h *APIHandler) HandleEvent(w http.ResponseWriter, r *http.Request) {
 	w.Write([]byte(`{"status":"accepted"}`))
 }
 
+// HandleListIncidents godoc
+// @Summary List incidents
+// @Description Returns the latest 100 grouped incidents for the authenticated project.
+// @Tags incidents
+// @Produce  json
+// @Security Bearer
+// @Success 200 {array} domain.Incident
+// @Failure 401 {string} string "Unauthorized"
+// @Failure 405 {string} string "Method Not Allowed"
+// @Failure 500 {string} string "Internal Server Error"
+// @Router /api/incidents [get]
 func (h *APIHandler) HandleListIncidents(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodGet {
 		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
 		return
 	}
 
-	// Simple auth (you can expand this later)
 	authHeader := r.Header.Get("Authorization")
 	if authHeader == "" || !strings.HasPrefix(authHeader, "Bearer ") {
 		http.Error(w, "Unauthorized", http.StatusUnauthorized)
@@ -115,39 +140,16 @@ func (h *APIHandler) HandleListIncidents(w http.ResponseWriter, r *http.Request)
 	}
 	apiKey := strings.TrimPrefix(authHeader, "Bearer ")
 
-	var projectID int64
-	err := h.db.QueryRow("SELECT id FROM projects WHERE api_key = ?", apiKey).Scan(&projectID)
+	projectID, err := h.projectRepo.GetIDByKey(r.Context(), apiKey)
 	if err != nil {
 		http.Error(w, "Unauthorized", http.StatusUnauthorized)
 		return
 	}
 
-	rows, err := h.db.Query(`
-		SELECT id, hash, exception_class, message, file, line, app_url, request_url, events_count, first_seen_at, last_seen_at 
-		FROM incidents 
-		WHERE project_id = ? 
-		ORDER BY last_seen_at DESC 
-		LIMIT 100`, projectID)
-	
+	incidents, err := h.incidentRepo.GetLatestIncidents(r.Context(), projectID, 100)
 	if err != nil {
 		http.Error(w, "Internal Server Error", http.StatusInternalServerError)
 		return
-	}
-	defer rows.Close()
-
-	var incidents []Incident
-	for rows.Next() {
-		var inc Incident
-		if err := rows.Scan(
-			&inc.ID, &inc.Hash, &inc.ExceptionClass, &inc.Message, 
-			&inc.File, &inc.Line, &inc.AppURL, &inc.RequestURL, 
-			&inc.EventsCount, &inc.FirstSeenAt, &inc.LastSeenAt,
-		); err != nil {
-			log.Printf("Error scanning row: %v", err)
-			continue
-		}
-		inc.ProjectID = projectID
-		incidents = append(incidents, inc)
 	}
 
 	w.Header().Set("Content-Type", "application/json")

@@ -1,0 +1,138 @@
+basePath: /
+definitions:
+  main.EventPayload:
+    properties:
+      app_url:
+        type: string
+      exception_class:
+        type: string
+      file:
+        type: string
+      line:
+        type: integer
+      message:
+        type: string
+      request_method:
+        type: string
+      request_url:
+        type: string
+      stack_trace:
+        type: string
+    type: object
+  main.Incident:
+    properties:
+      appURL:
+        type: string
+      eventsCount:
+        type: integer
+      exceptionClass:
+        type: string
+      file:
+        type: string
+      firstSeenAt:
+        type: string
+      hash:
+        type: string
+      id:
+        format: int64
+        type: integer
+      lastSeenAt:
+        type: string
+      line:
+        type: integer
+      message:
+        type: string
+      projectID:
+        format: int64
+        type: integer
+      requestURL:
+        type: string
+      stackTrace:
+        type: string
+    type: object
+host: localhost:8080
+info:
+  contact: {}
+  description: API documentation for LaraSentry Go Server.
+  title: LaraSentry API
+  version: "1.0"
+paths:
+  /api/events:
+    post:
+      consumes:
+      - application/json
+      description: Receives an exception/error payload from a Laravel application.
+      parameters:
+      - description: Event Payload
+        in: body
+        name: payload
+        required: true
+        schema:
+          $ref: '#/definitions/main.EventPayload'
+      produces:
+      - application/json
+      responses:
+        "202":
+          description: Accepted
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "400":
+          description: Bad Request
+          schema:
+            type: string
+        "401":
+          description: Unauthorized
+          schema:
+            type: string
+        "403":
+          description: Forbidden
+          schema:
+            type: string
+        "405":
+          description: Method Not Allowed
+          schema:
+            type: string
+      security:
+      - Bearer: []
+      summary: Send a new error event
+      tags:
+      - events
+  /api/incidents:
+    get:
+      description: Returns the latest 100 grouped incidents for the authenticated
+        project.
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            items:
+              $ref: '#/definitions/main.Incident'
+            type: array
+        "401":
+          description: Unauthorized
+          schema:
+            type: string
+        "405":
+          description: Method Not Allowed
+          schema:
+            type: string
+        "500":
+          description: Internal Server Error
+          schema:
+            type: string
+      security:
+      - Bearer: []
+      summary: List incidents
+      tags:
+      - incidents
+securityDefinitions:
+  Bearer:
+    description: Type "Bearer" followed by a space and API key.
+    in: header
+    name: Authorization
+    type: apiKey
+swagger: "2.0"

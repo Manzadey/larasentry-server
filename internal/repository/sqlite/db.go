@@ -1,4 +1,4 @@
-package main
+package sqlite
 
 import (
 	"database/sql"
@@ -14,13 +14,11 @@ func InitDB(dbPath string) (*sql.DB, error) {
 		return nil, err
 	}
 
-	// Включаем WAL режим для производительности и параллельности
 	_, err = db.Exec("PRAGMA journal_mode=WAL;")
 	if err != nil {
 		return nil, err
 	}
 
-	// Create tables if not exist
 	createSchema := `
 	CREATE TABLE IF NOT EXISTS projects (
 		id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -50,7 +48,6 @@ func InitDB(dbPath string) (*sql.DB, error) {
 		return nil, err
 	}
 	
-	// Create a default project for testing if empty
 	var count int
 	err = db.QueryRow("SELECT COUNT(*) FROM projects").Scan(&count)
 	if err == nil && count == 0 {

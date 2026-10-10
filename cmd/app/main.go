@@ -8,13 +8,30 @@ import (
 	"time"
 
 	"github.com/joho/godotenv"
+	httpSwagger "github.com/swaggo/http-swagger"
+
+	_ "server/docs"
+	"server/internal/domain"
+	deliveryHttp "server/internal/delivery/http"
+	"server/internal/delivery/telegram"
+	"server/internal/repository/sqlite"
+	"server/internal/usecase"
 )
 
+// @title LaraSentry API
+// @version 1.0
+// @description API documentation for LaraSentry Go Server.
+// @host localhost:8080
+// @BasePath /
+
+// @securityDefinitions.apikey Bearer
+// @in header
+// @name Authorization
+// @description Type "Bearer" followed by a space and API key.
+
 func main() {
-	// Load .env file if exists
 	_ = godotenv.Load()
 
-	// Configuration
 	port := os.Getenv("PORT")
 	if port == "" {
 		port = "8080"
@@ -36,27 +53,30 @@ func main() {
 	}
 
 	// 1. Initialize SQLite Database
-	db, err := InitDB(dbPath)
+	db, err := sqlite.InitDB(dbPath)
 	if err != nil {
 		log.Fatalf("Failed to initialize DB: %v", err)
 	}
 	defer db.Close()
 
-	// 2. Setup Channel and Background Processor
-	// Buffered channel for 1000 events to prevent HTTP blocking
-	eventChan := make(chan IncomingEvent, 1000)
-	
-	processor := NewProcessor(db, eventChan)
+	// 2. Setup Repositories
+	projectRepo := sqlite.NewProjectRepo(db)
+	incidentRepo := sqlite.NewIncidentRepo(db)
+
+	// 3. Setup Channels and UseCases
+	eventChan := make(chan domain.IncomingEvent, 1000)
+	processor := usecase.NewProcessor(incidentRepo, eventChan)
 	go processor.Start()
 
-	// 2.5 Setup Database Cleaner
-	go StartCleaner(db, 30)
+	// 4. Setup Database Cleaner
+	go sqlite.StartCleaner(incidentRepo, 30)
 
-	// 3. Setup Telegram Alert Manager
-	alertManager := NewAlertManager(processor, tgToken, tgChatID, alertInterval)
+	// 5. Setup Telegram Alert Manager
+	alertSender := telegram.NewBotSender(tgToken, tgChatID)
+	alertManager := usecase.NewAlertManager(processor, alertSender, alertInterval)
 	go alertManager.Start()
 
-	// 4. Setup HTTP Server
+	// 6. Setup HTTP Server
 	allowedIPsStr := os.Getenv("ALLOWED_IPS")
 	var allowedIPs []string
 	if allowedIPsStr != "" {
@@ -67,11 +87,12 @@ func main() {
 			}
 		}
 	}
-	apiHandler := NewAPIHandler(db, eventChan, allowedIPs)
+	apiHandler := deliveryHttp.NewAPIHandler(projectRepo, incidentRepo, eventChan, allowedIPs)
 
 	mux := http.NewServeMux()
 	mux.HandleFunc("/api/events", apiHandler.HandleEvent)
 	mux.HandleFunc("/api/incidents", apiHandler.HandleListIncidents)
+	mux.HandleFunc("/swagger/", httpSwagger.WrapHandler)
 	
 	log.Printf("Larasentry server is running on :%s...", port)
 	if err := http.ListenAndServe(":"+port, mux); err != nil {
