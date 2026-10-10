@@ -4,23 +4,54 @@ import (
 	"database/sql"
 	"encoding/json"
 	"log"
+	"net"
 	"net/http"
 	"strings"
 )
 
 type APIHandler struct {
-	db        *sql.DB
-	eventChan chan IncomingEvent
+	db         *sql.DB
+	eventChan  chan IncomingEvent
+	allowedIPs []string
 }
 
-func NewAPIHandler(db *sql.DB, eventChan chan IncomingEvent) *APIHandler {
-	return &APIHandler{db: db, eventChan: eventChan}
+func NewAPIHandler(db *sql.DB, eventChan chan IncomingEvent, allowedIPs []string) *APIHandler {
+	return &APIHandler{db: db, eventChan: eventChan, allowedIPs: allowedIPs}
+}
+
+func getClientIP(r *http.Request) string {
+	ip := r.Header.Get("X-Real-IP")
+	if ip == "" {
+		ip = r.Header.Get("X-Forwarded-For")
+	}
+	if ip == "" {
+		ip, _, _ = net.SplitHostPort(r.RemoteAddr)
+	} else {
+		ips := strings.Split(ip, ",")
+		ip = strings.TrimSpace(ips[0])
+	}
+	return ip
 }
 
 func (h *APIHandler) HandleEvent(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
 		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
 		return
+	}
+
+	if len(h.allowedIPs) > 0 {
+		clientIP := getClientIP(r)
+		allowed := false
+		for _, ip := range h.allowedIPs {
+			if ip == clientIP {
+				allowed = true
+				break
+			}
+		}
+		if !allowed {
+			http.Error(w, "Forbidden - IP not allowed", http.StatusForbidden)
+			return
+		}
 	}
 
 	// 1. Auth via API Key (Authorization: Bearer <token>)

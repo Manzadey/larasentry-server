@@ -4,6 +4,7 @@ import (
 	"log"
 	"net/http"
 	"os"
+	"strings"
 	"time"
 
 	"github.com/joho/godotenv"
@@ -56,7 +57,17 @@ func main() {
 	go alertManager.Start()
 
 	// 4. Setup HTTP Server
-	apiHandler := NewAPIHandler(db, eventChan)
+	allowedIPsStr := os.Getenv("ALLOWED_IPS")
+	var allowedIPs []string
+	if allowedIPsStr != "" {
+		for _, ip := range strings.Split(allowedIPsStr, ",") {
+			ip = strings.TrimSpace(ip)
+			if ip != "" {
+				allowedIPs = append(allowedIPs, ip)
+			}
+		}
+	}
+	apiHandler := NewAPIHandler(db, eventChan, allowedIPs)
 
 	mux := http.NewServeMux()
 	mux.HandleFunc("/api/events", apiHandler.HandleEvent)
