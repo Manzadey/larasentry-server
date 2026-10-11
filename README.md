@@ -41,5 +41,41 @@ Used by the Laravel client to push errors. Requires `Authorization: Bearer <API_
 
 Returns a JSON array of the latest errors for a specific project. Requires `Authorization: Bearer <API_KEY>`.
 
+## CI/CD и автодеплой (GitHub Actions)
+
+В проекте настроен пайплайн автоматического тестирования и деплоя (`.github/workflows/deploy.yml`):
+- При создании Pull Request или Push в `main` запускаются тесты (`go test ./...`) и валидация сборки.
+- При успешном прохождении тестов на ветке `main` (или ручном запуске через `workflow_dispatch`) происходит автоматический деплой на сервер по SSH с пересборкой контейнеров Docker Compose.
+
+### Необходимые GitHub Secrets
+
+В репозитории GitHub перейдите в **Settings** -> **Secrets and variables** -> **Actions** и добавьте следующие секреты:
+
+| Секрет | Описание | Обязательный |
+|---|---|---|
+| `SERVER_HOST` | IP-адрес или домен вашего сервера (например, `194.87.12.34`) | Да |
+| `SERVER_USER` | Пользователь для подключения по SSH (например, `root` или `ubuntu`) | Да |
+| `SERVER_SSH_KEY` | Приватный SSH-ключ для авторизации (содержимое `~/.ssh/id_ed25519` или `~/.ssh/id_rsa`) | Да (если используется ключ) |
+| `SERVER_PASSWORD` | Пароль пользователя SSH (если авторизация по паролю вместо ключа) | Опционально |
+| `SERVER_PATH` | Абсолютный путь к папке проекта на сервере (например, `/opt/larasentry-server`) | Да |
+| `SERVER_PORT` | Порт SSH (по умолчанию `22`) | Опционально |
+| `SERVER_PASSPHRASE` | Пароль от приватного SSH-ключа (если ключ зашифрован) | Опционально |
+
+### Первичная подготовка сервера
+
+1. Склонируйте репозиторий в нужную директорию на сервере:
+   ```bash
+   git clone git@github.com:Manzadey/larasentry-server.git /opt/larasentry-server
+   cd /opt/larasentry-server
+   ```
+2. Создайте файл `.env` с боевыми настройками:
+   ```bash
+   cp .env.example .env
+   nano .env
+   ```
+3. Убедитесь, что публичный SSH-ключ раннера GitHub добавлен в `~/.ssh/authorized_keys` на сервере.
+4. Убедитесь, что Docker и Docker Compose установлены и запущены.
+
 ## License
 MIT License
+
