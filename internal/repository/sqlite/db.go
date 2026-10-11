@@ -2,6 +2,7 @@ package sqlite
 
 import (
 	"database/sql"
+	"fmt"
 	"log"
 
 	_ "modernc.org/sqlite"
@@ -26,6 +27,17 @@ func InitDB(dbPath string) (*sql.DB, error) {
 		api_key TEXT NOT NULL UNIQUE
 	);
 
+	CREATE TABLE IF NOT EXISTS releases (
+		id INTEGER PRIMARY KEY AUTOINCREMENT,
+		project_id INTEGER NOT NULL,
+		version TEXT NOT NULL,
+		created_at DATETIME NOT NULL,
+		UNIQUE(project_id, version),
+		FOREIGN KEY(project_id) REFERENCES projects(id)
+	);
+
+	CREATE INDEX IF NOT EXISTS idx_releases_proj_date ON releases(project_id, created_at DESC);
+
 	CREATE TABLE IF NOT EXISTS incidents (
 		id INTEGER PRIMARY KEY AUTOINCREMENT,
 		project_id INTEGER NOT NULL,
@@ -40,14 +52,29 @@ func InitDB(dbPath string) (*sql.DB, error) {
 		events_count INTEGER NOT NULL DEFAULT 1,
 		first_seen_at DATETIME NOT NULL,
 		last_seen_at DATETIME NOT NULL,
+		environment TEXT NOT NULL DEFAULT 'production',
+		first_release TEXT,
+		last_release TEXT,
+		status TEXT NOT NULL DEFAULT 'unresolved',
+		resolved_in_release TEXT,
+		resolved_at DATETIME,
+		is_regression INTEGER NOT NULL DEFAULT 0,
 		FOREIGN KEY(project_id) REFERENCES projects(id)
 	);
+
+	CREATE INDEX IF NOT EXISTS idx_incidents_status ON incidents(project_id, status);
+	CREATE INDEX IF NOT EXISTS idx_incidents_last_seen ON incidents(project_id, last_seen_at DESC);
 	`
 	_, err = db.Exec(createSchema)
 	if err != nil {
 		return nil, err
 	}
-	
+
+	// Idempotent migration for existing tables that may miss the new columns
+	if err := migrateIncidentsColumns(db); err != nil {
+		return nil, fmt.Errorf("migration failed: %w", err)
+	}
+
 	var count int
 	err = db.QueryRow("SELECT COUNT(*) FROM projects").Scan(&count)
 	if err == nil && count == 0 {
@@ -56,4 +83,49 @@ func InitDB(dbPath string) (*sql.DB, error) {
 	}
 
 	return db, nil
+}
+
+func migrateIncidentsColumns(db *sql.DB) error {
+	rows, err := db.Query("PRAGMA table_info(incidents);")
+	if err != nil {
+		return err
+	}
+	defer rows.Close()
+
+	existing := make(map[string]bool)
+	for rows.Next() {
+		var cid int
+		var name, colType string
+		var notNull, pk int
+		var dfltValue sql.NullString
+		if err := rows.Scan(&cid, &name, &colType, &notNull, &dfltValue, &pk); err != nil {
+			return err
+		}
+		existing[name] = true
+	}
+
+	columnsToAdd := []struct {
+		name string
+		def  string
+	}{
+		{"environment", "TEXT NOT NULL DEFAULT 'production'"},
+		{"first_release", "TEXT"},
+		{"last_release", "TEXT"},
+		{"status", "TEXT NOT NULL DEFAULT 'unresolved'"},
+		{"resolved_in_release", "TEXT"},
+		{"resolved_at", "DATETIME"},
+		{"is_regression", "INTEGER NOT NULL DEFAULT 0"},
+	}
+
+	for _, col := range columnsToAdd {
+		if !existing[col.name] {
+			stmt := fmt.Sprintf("ALTER TABLE incidents ADD COLUMN %s %s;", col.name, col.def)
+			if _, err := db.Exec(stmt); err != nil {
+				return fmt.Errorf("failed adding column %s: %w", col.name, err)
+			}
+			log.Printf("[DB] Added column %s to incidents", col.name)
+		}
+	}
+
+	return nil
 }

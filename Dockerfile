@@ -8,7 +8,7 @@ RUN go mod download
 
 # Копируем код и собираем
 COPY . .
-RUN CGO_ENABLED=0 GOOS=linux go build -o larasentry-server .
+RUN CGO_ENABLED=0 GOOS=linux go build -o larasentry-server ./cmd/app
 
 # Финальный легковесный образ
 FROM alpine:latest

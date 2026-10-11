@@ -15,6 +15,7 @@ type Processor struct {
 	eventChan   chan domain.IncomingEvent
 	alertBuffer map[string]*domain.Incident
 	mu          sync.Mutex
+	onIncident  func(inc domain.Incident)
 }
 
 func NewProcessor(repo domain.IncidentRepository, eventChan chan domain.IncomingEvent) *Processor {
@@ -23,6 +24,12 @@ func NewProcessor(repo domain.IncidentRepository, eventChan chan domain.Incoming
 		eventChan:   eventChan,
 		alertBuffer: make(map[string]*domain.Incident),
 	}
+}
+
+func (p *Processor) SetOnIncident(fn func(inc domain.Incident)) {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	p.onIncident = fn
 }
 
 func (p *Processor) Start() {
@@ -39,37 +46,42 @@ func (p *Processor) processEvent(ctx context.Context, event domain.IncomingEvent
 	hash := hex.EncodeToString(hashBytes[:])
 
 	// 2. UPSERT in Database
-	incidentID, _, err := p.repo.UpsertIncident(ctx, event, hash)
+	res, err := p.repo.UpsertIncident(ctx, event, hash)
 	if err != nil {
 		log.Printf("Error upserting incident: %v", err)
 		return
 	}
 
-	// 3. Update alert buffer
-	p.mu.Lock()
-	defer p.mu.Unlock()
-
-	if incident, exists := p.alertBuffer[hash]; exists {
-		incident.EventsCount++
-	} else {
-		p.alertBuffer[hash] = &domain.Incident{
-			ID:             incidentID,
-			ProjectID:      event.ProjectID,
-			Hash:           hash,
-			ExceptionClass: event.Payload.ExceptionClass,
-			Message:        event.Payload.Message,
-			File:           event.Payload.File,
-			Line:           event.Payload.Line,
-			AppURL:         event.Payload.AppURL,
-			EventsCount:    1,
+	// 3. Update alert buffer only if not ignored (resolved old versions or ignored issues are silenced)
+	if !res.Ignored {
+		p.mu.Lock()
+		if existing, exists := p.alertBuffer[hash]; exists {
+			existing.EventsCount++
+			if res.IsRegression {
+				existing.IsRegression = true
+			}
+			existing.LastRelease = res.Incident.LastRelease
+		} else {
+			incCopy := res.Incident
+			p.alertBuffer[hash] = &incCopy
 		}
+		p.mu.Unlock()
+	}
+
+	// 4. SSE Realtime Broadcast
+	p.mu.Lock()
+	callback := p.onIncident
+	p.mu.Unlock()
+
+	if callback != nil && !res.Ignored {
+		go callback(res.Incident)
 	}
 }
 
 func (p *Processor) GetAndClearBuffer() map[string]*domain.Incident {
 	p.mu.Lock()
 	defer p.mu.Unlock()
-	
+
 	if len(p.alertBuffer) == 0 {
 		return nil
 	}

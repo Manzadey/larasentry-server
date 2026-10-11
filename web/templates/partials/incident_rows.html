@@ -1,0 +1,21 @@
+{{if .Incidents}}
+  {{range .Incidents}}
+    {{template "incident_row.html" .}}
+  {{end}}
+{{else}}
+  <tr>
+    <td colspan="6" class="py-16 text-center">
+      <div class="flex flex-col items-center justify-center space-y-3">
+        <div class="w-12 h-12 rounded-full bg-slate-800 flex items-center justify-center text-slate-500">
+          <svg class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9.172 16.172a4 4 0 015.656 0M9 10h.01M15 10h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
+          </svg>
+        </div>
+        <div class="text-sm font-medium text-slate-400">Инциденты не найдены</div>
+        <p class="text-xs text-slate-600 max-w-sm">
+          По текущим фильтрам или поисковому запросу ничего не найдено, либо логов еще не поступало.
+        </p>
+      </div>
+    </td>
+  </tr>
+{{end}}

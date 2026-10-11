@@ -1,0 +1,8 @@
+larasentry-server
+main
+*.db
+*.db-shm
+*.db-wal
+data/
+.git
+tmp.go

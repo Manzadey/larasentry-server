@@ -5,6 +5,8 @@
 *.so
 *.dylib
 larasentry-server
+main
+tmp.go
 
 # Test binary, built with `go test -c`
 *.test

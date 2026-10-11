@@ -13,6 +13,7 @@ import (
 	_ "server/docs"
 	"server/internal/domain"
 	deliveryHttp "server/internal/delivery/http"
+	"server/internal/delivery/sse"
 	"server/internal/delivery/telegram"
 	"server/internal/repository/sqlite"
 	"server/internal/usecase"
@@ -42,6 +43,7 @@ func main() {
 	}
 	tgToken := os.Getenv("TG_BOT_TOKEN")
 	tgChatID := os.Getenv("TG_CHAT_ID")
+	tgProxy := os.Getenv("TG_PROXY")
 	
 	intervalStr := os.Getenv("ALERT_INTERVAL")
 	alertInterval := 5 * time.Minute
@@ -61,7 +63,8 @@ func main() {
 
 	// 2. Setup Repositories
 	projectRepo := sqlite.NewProjectRepo(db)
-	incidentRepo := sqlite.NewIncidentRepo(db)
+	releaseRepo := sqlite.NewReleaseRepo(db)
+	incidentRepo := sqlite.NewIncidentRepo(db, releaseRepo)
 
 	// 3. Setup Channels and UseCases
 	eventChan := make(chan domain.IncomingEvent, 1000)
@@ -72,11 +75,22 @@ func main() {
 	go sqlite.StartCleaner(incidentRepo, 30)
 
 	// 5. Setup Telegram Alert Manager
-	alertSender := telegram.NewBotSender(tgToken, tgChatID)
+	alertSender := telegram.NewBotSender(tgToken, tgChatID, tgProxy)
 	alertManager := usecase.NewAlertManager(processor, alertSender, alertInterval)
 	go alertManager.Start()
 
-	// 6. Setup HTTP Server
+	// 6. Setup SSE Broker & UI Handler
+	sseBroker := sse.NewBroker()
+	uiHandler, err := deliveryHttp.NewUIHandler(projectRepo, incidentRepo, releaseRepo, sseBroker)
+	if err != nil {
+		log.Fatalf("Failed to initialize UI handler: %v", err)
+	}
+
+	processor.SetOnIncident(func(inc domain.Incident) {
+		sseBroker.BroadcastIncident(inc, uiHandler.GetRowTemplate())
+	})
+
+	// 7. Setup HTTP Server
 	allowedIPsStr := os.Getenv("ALLOWED_IPS")
 	var allowedIPs []string
 	if allowedIPsStr != "" {
@@ -93,8 +107,23 @@ func main() {
 	mux.HandleFunc("/api/events", apiHandler.HandleEvent)
 	mux.HandleFunc("/api/incidents", apiHandler.HandleListIncidents)
 	mux.HandleFunc("/swagger/", httpSwagger.WrapHandler)
+
+	// UI routes
+	mux.HandleFunc("/ui", uiHandler.HandleIndex)
+	mux.HandleFunc("/ui/incidents", uiHandler.HandleIncidents)
+	mux.HandleFunc("/ui/incidents/", uiHandler.HandleIncidentDetail)
+	mux.HandleFunc("/ui/events/stream", uiHandler.HandleEventsStream)
+
+	// Root redirect
+	mux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/" {
+			http.Redirect(w, r, "/ui", http.StatusSeeOther)
+			return
+		}
+		http.NotFound(w, r)
+	})
 	
-	log.Printf("Larasentry server is running on :%s...", port)
+	log.Printf("Larasentry server is running on :%s (UI at http://localhost:%s/ui)...", port, port)
 	if err := http.ListenAndServe(":"+port, mux); err != nil {
 		log.Fatalf("Server failed: %v", err)
 	}

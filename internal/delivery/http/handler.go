@@ -86,7 +86,7 @@ func (h *APIHandler) HandleEvent(w http.ResponseWriter, r *http.Request) {
 	}
 	apiKey := strings.TrimPrefix(authHeader, "Bearer ")
 
-	projectID, err := h.projectRepo.GetIDByKey(r.Context(), apiKey)
+	project, err := h.projectRepo.GetByKey(r.Context(), apiKey)
 	if err != nil {
 		http.Error(w, "Unauthorized - Invalid API Key", http.StatusUnauthorized)
 		return
@@ -98,18 +98,29 @@ func (h *APIHandler) HandleEvent(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Trim incoming strings
+	payload.Release = strings.TrimSpace(payload.Release)
+	payload.Environment = strings.TrimSpace(payload.Environment)
+	payload.Message = strings.TrimSpace(payload.Message)
+	payload.ExceptionClass = strings.TrimSpace(payload.ExceptionClass)
+	payload.File = strings.TrimSpace(payload.File)
+	payload.AppURL = strings.TrimSpace(payload.AppURL)
+	payload.RequestURL = strings.TrimSpace(payload.RequestURL)
+	payload.StackTrace = strings.TrimSpace(payload.StackTrace)
+
 	if payload.ExceptionClass == "" || payload.Message == "" {
 		http.Error(w, "Bad Request - Missing exception_class or message", http.StatusBadRequest)
 		return
 	}
 
 	h.eventChan <- domain.IncomingEvent{
-		ProjectID:  projectID,
-		ProjectKey: apiKey,
-		Payload:    payload,
+		ProjectID:   project.ID,
+		ProjectName: project.Name,
+		ProjectKey:  apiKey,
+		Payload:     payload,
 	}
 
-	log.Printf("Received event for project %d: %s\n", projectID, payload.ExceptionClass)
+	log.Printf("Received event for project %s (%d): %s\n", project.Name, project.ID, payload.ExceptionClass)
 
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusAccepted)

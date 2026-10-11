@@ -1,0 +1,153 @@
+{{template "layout.html" .}}
+
+{{define "content"}}
+<div class="flex-1 flex flex-col h-full bg-slate-950 overflow-hidden">
+  
+  <!-- Верхняя панель: Поиск, фильтры и статистика -->
+  <div class="p-4 border-b border-slate-800 bg-slate-900/50 backdrop-blur shrink-0 space-y-3">
+    <form id="filter-form" 
+          hx-get="/ui/incidents" 
+          hx-target="#incidents-table-body" 
+          hx-trigger="change from:select, submit, incident-updated from:body"
+          hx-indicator="#search-spinner"
+          class="flex flex-col md:flex-row items-stretch md:items-center gap-3 justify-between"
+          onsubmit="event.preventDefault();">
+      
+      <!-- Поле поиска -->
+      <div class="relative flex-1 max-w-2xl">
+        <div class="absolute inset-y-0 left-0 pl-3.5 flex items-center pointer-events-none text-slate-500">
+          <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" />
+          </svg>
+        </div>
+        
+        <input type="text" 
+               id="search-input"
+               name="q" 
+               value="{{.Query}}"
+               placeholder="Поиск по ошибке, сообщению, релизу, файлу... (нажмите / для фокуса)" 
+               class="w-full pl-10 pr-24 py-2 bg-slate-900 border border-slate-700/80 rounded-xl text-sm text-slate-100 placeholder-slate-500 focus:outline-none focus:ring-2 focus:ring-rose-500/50 focus:border-rose-500 transition shadow-inner font-sans"
+               hx-get="/ui/incidents"
+               hx-target="#incidents-table-body"
+               hx-trigger="input changed delay:300ms, search"
+               hx-include="#filter-form"
+               hx-indicator="#search-spinner">
+
+        <!-- Правые индикаторы внутри поля ввода -->
+        <div class="absolute inset-y-0 right-0 pr-3 flex items-center space-x-2">
+          <!-- Спиннер загрузки поиска -->
+          <div id="search-spinner" class="htmx-indicator">
+            <svg class="animate-spin h-4 w-4 text-rose-500" fill="none" viewBox="0 0 24 24">
+              <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
+              <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v8H4z"></path>
+            </svg>
+          </div>
+          <!-- Подсказка горячей клавиши -->
+          <kbd class="hidden sm:inline-block px-1.5 py-0.5 text-[10px] font-mono font-semibold text-slate-400 bg-slate-800 border border-slate-700 rounded shadow-xs">/</kbd>
+        </div>
+      </div>
+
+      <!-- Выпадающие фильтры -->
+      <div class="flex items-center gap-2 flex-wrap">
+        <!-- Статус -->
+        <div class="relative">
+          <select name="status" 
+                  class="bg-slate-900 border border-slate-700/80 rounded-xl px-3 py-2 text-xs font-medium text-slate-200 focus:outline-none focus:ring-2 focus:ring-rose-500/50 appearance-none pr-8 cursor-pointer">
+            <option value="unresolved" {{if eq .SelectedStatus "unresolved"}}selected{{end}}>🔴 Открытые</option>
+            <option value="resolved" {{if eq .SelectedStatus "resolved"}}selected{{end}}>🟢 Решённые</option>
+            <option value="all" {{if eq .SelectedStatus "all"}}selected{{end}}>Все статусы</option>
+          </select>
+          <div class="absolute inset-y-0 right-0 pr-2.5 flex items-center pointer-events-none text-slate-500">
+            <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7 7"></path></svg>
+          </div>
+        </div>
+
+        <!-- Выбор проекта -->
+        <div class="relative">
+          <select name="project_id" 
+                  class="bg-slate-900 border border-slate-700/80 rounded-xl px-3 py-2 text-xs font-medium text-slate-200 focus:outline-none focus:ring-2 focus:ring-rose-500/50 appearance-none pr-8 cursor-pointer">
+            <option value="0">Все проекты</option>
+            {{range .Projects}}
+              <option value="{{.ID}}" {{if eq .ID $.SelectedProjectID}}selected{{end}}>{{.Name}}</option>
+            {{end}}
+          </select>
+          <div class="absolute inset-y-0 right-0 pr-2.5 flex items-center pointer-events-none text-slate-500">
+            <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7 7"></path></svg>
+          </div>
+        </div>
+
+        <!-- Сортировка -->
+        <div class="relative">
+          <select name="sort" 
+                  class="bg-slate-900 border border-slate-700/80 rounded-xl px-3 py-2 text-xs font-medium text-slate-200 focus:outline-none focus:ring-2 focus:ring-rose-500/50 appearance-none pr-8 cursor-pointer">
+            <option value="recent">Сначала свежие</option>
+            <option value="count">По частоте (Top)</option>
+          </select>
+          <div class="absolute inset-y-0 right-0 pr-2.5 flex items-center pointer-events-none text-slate-500">
+            <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7 7"></path></svg>
+          </div>
+        </div>
+
+        <!-- Кнопка сброса -->
+        <button type="button" 
+                onclick="resetFilters()"
+                class="px-3 py-2 rounded-xl text-xs font-medium text-slate-400 hover:text-white bg-slate-800/80 hover:bg-slate-700 border border-slate-700/60 transition">
+          Сброс
+        </button>
+      </div>
+    </form>
+
+    <!-- Полоса быстрой сводки -->
+    <div class="flex items-center justify-between text-xs text-slate-400 pt-1">
+      <div class="flex items-center gap-4">
+        <span>Открыто: <strong class="text-rose-400 font-mono">{{.TotalUnresolved}}</strong></span>
+        <span class="text-slate-600">|</span>
+        <span>Решено: <strong class="text-emerald-400 font-mono">{{.TotalResolved}}</strong></span>
+        <span class="text-slate-600">|</span>
+        <span>Всего: <strong class="text-white font-mono">{{.TotalIncidents}}</strong></span>
+        <span class="text-slate-600">|</span>
+        <span>В списке: <strong class="text-slate-300 font-mono">{{len .Incidents}}</strong></span>
+      </div>
+      <div class="text-[11px] text-slate-500 font-mono hidden sm:block">
+        Автообновление через Server-Sent Events (SSE)
+      </div>
+    </div>
+  </div>
+
+  <!-- Таблица логов / инцидентов -->
+  <div class="flex-1 overflow-auto">
+    <table class="w-full text-left border-collapse">
+      <!-- Заголовок таблицы -->
+      <thead class="sticky top-0 bg-slate-900 border-b border-slate-800 text-[11px] uppercase font-semibold text-slate-400 tracking-wider z-10 backdrop-blur-md">
+        <tr>
+          <th class="py-3 px-4 w-20">Счетчик</th>
+          <th class="py-3 px-4">Проект, Релиз и Ошибка</th>
+          <th class="py-3 px-4 hidden md:table-cell">Файл и строка</th>
+          <th class="py-3 px-4 hidden lg:table-cell">Endpoint</th>
+          <th class="py-3 px-4 text-right w-36">Время</th>
+          <th class="py-3 px-3 text-right w-12"></th>
+        </tr>
+      </thead>
+
+      <!-- Тело таблицы со связкой SSE для реалтайма -->
+      <tbody id="incidents-table-body" 
+             hx-ext="sse" 
+             sse-connect="/ui/events/stream" 
+             sse-swap="new-incident" 
+             hx-swap="afterbegin"
+             class="divide-y divide-slate-800/50">
+        {{template "incident_rows.html" .}}
+      </tbody>
+    </table>
+  </div>
+</div>
+
+<script>
+  function resetFilters() {
+    const form = document.getElementById('filter-form');
+    form.reset();
+    document.getElementById('search-input').value = '';
+    htmx.trigger(form, 'submit');
+  }
+</script>
+{{end}}
