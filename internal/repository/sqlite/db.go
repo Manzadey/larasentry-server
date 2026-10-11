@@ -4,12 +4,21 @@ import (
 	"database/sql"
 	"fmt"
 	"log"
+	"os"
+	"path/filepath"
 
 	_ "modernc.org/sqlite"
 )
 
 // InitDB initializes SQLite database and creates tables
 func InitDB(dbPath string) (*sql.DB, error) {
+	// Ensure directory exists for SQLite file
+	if dir := filepath.Dir(dbPath); dir != "" && dir != "." {
+		if err := os.MkdirAll(dir, 0755); err != nil {
+			return nil, fmt.Errorf("failed to create db directory %s: %w", dir, err)
+		}
+	}
+
 	db, err := sql.Open("sqlite", dbPath)
 	if err != nil {
 		return nil, err
@@ -20,7 +29,7 @@ func InitDB(dbPath string) (*sql.DB, error) {
 		return nil, err
 	}
 
-	createSchema := `
+	createBaseSchema := `
 	CREATE TABLE IF NOT EXISTS projects (
 		id INTEGER PRIMARY KEY AUTOINCREMENT,
 		name TEXT NOT NULL,
@@ -61,18 +70,24 @@ func InitDB(dbPath string) (*sql.DB, error) {
 		is_regression INTEGER NOT NULL DEFAULT 0,
 		FOREIGN KEY(project_id) REFERENCES projects(id)
 	);
-
-	CREATE INDEX IF NOT EXISTS idx_incidents_status ON incidents(project_id, status);
-	CREATE INDEX IF NOT EXISTS idx_incidents_last_seen ON incidents(project_id, last_seen_at DESC);
 	`
-	_, err = db.Exec(createSchema)
+	_, err = db.Exec(createBaseSchema)
 	if err != nil {
 		return nil, err
 	}
 
-	// Idempotent migration for existing tables that may miss the new columns
+	// 1. Idempotent migration for existing tables that may miss the new columns
 	if err := migrateIncidentsColumns(db); err != nil {
 		return nil, fmt.Errorf("migration failed: %w", err)
+	}
+
+	// 2. Create indexes ONLY AFTER columns are guaranteed to exist
+	createIndexes := `
+	CREATE INDEX IF NOT EXISTS idx_incidents_status ON incidents(project_id, status);
+	CREATE INDEX IF NOT EXISTS idx_incidents_last_seen ON incidents(project_id, last_seen_at DESC);
+	`
+	if _, err := db.Exec(createIndexes); err != nil {
+		return nil, fmt.Errorf("failed to create indexes: %w", err)
 	}
 
 	var count int
