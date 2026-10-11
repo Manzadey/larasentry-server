@@ -289,6 +289,47 @@ func (r *IncidentRepo) GetLatestIncidents(ctx context.Context, projectID int64, 
 	})
 }
 
+func buildIncidentWhere(filter domain.IncidentFilter) (string, []interface{}) {
+	where := " WHERE 1=1"
+	var args []interface{}
+
+	if filter.ProjectID > 0 {
+		where += " AND i.project_id = ?"
+		args = append(args, filter.ProjectID)
+	}
+
+	if filter.Status != "" && filter.Status != "all" {
+		where += " AND i.status = ?"
+		args = append(args, filter.Status)
+	}
+
+	if filter.Environment != "" {
+		where += " AND i.environment = ?"
+		args = append(args, filter.Environment)
+	}
+
+	if filter.Release != "" {
+		where += " AND (i.first_release = ? OR i.last_release = ?)"
+		args = append(args, filter.Release, filter.Release)
+	}
+
+	if filter.IsRegression != nil {
+		if *filter.IsRegression {
+			where += " AND i.is_regression = 1"
+		} else {
+			where += " AND i.is_regression = 0"
+		}
+	}
+
+	if filter.Query != "" {
+		where += " AND (i.message LIKE ? OR i.exception_class LIKE ? OR i.file LIKE ? OR i.request_url LIKE ? OR p.name LIKE ? OR i.last_release LIKE ?)"
+		pattern := "%" + filter.Query + "%"
+		args = append(args, pattern, pattern, pattern, pattern, pattern, pattern)
+	}
+
+	return where, args
+}
+
 func (r *IncidentRepo) GetIncidents(ctx context.Context, filter domain.IncidentFilter) ([]domain.Incident, error) {
 	query := `
 		SELECT 
@@ -299,38 +340,30 @@ func (r *IncidentRepo) GetIncidents(ctx context.Context, filter domain.IncidentF
 			i.status, COALESCE(i.resolved_in_release, ''), i.resolved_at, i.is_regression
 		FROM incidents i
 		LEFT JOIN projects p ON i.project_id = p.id
-		WHERE 1=1
 	`
-	var args []interface{}
+	where, args := buildIncidentWhere(filter)
+	query += where
 
-	if filter.ProjectID > 0 {
-		query += " AND i.project_id = ?"
-		args = append(args, filter.ProjectID)
-	}
-
-	if filter.Status != "" && filter.Status != "all" {
-		query += " AND i.status = ?"
-		args = append(args, filter.Status)
-	}
-
-	if filter.Query != "" {
-		query += " AND (i.message LIKE ? OR i.exception_class LIKE ? OR i.file LIKE ? OR i.request_url LIKE ? OR p.name LIKE ? OR i.last_release LIKE ?)"
-		pattern := "%" + filter.Query + "%"
-		args = append(args, pattern, pattern, pattern, pattern, pattern, pattern)
-	}
-
-	if filter.Sort == "count" {
+	switch filter.Sort {
+	case "count":
 		query += " ORDER BY i.events_count DESC, i.last_seen_at DESC"
-	} else {
+	case "first_seen":
+		query += " ORDER BY i.first_seen_at DESC"
+	default:
 		query += " ORDER BY i.last_seen_at DESC"
 	}
 
 	limit := filter.Limit
-	if limit <= 0 || limit > 500 {
-		limit = 100
+	if limit <= 0 || limit > 200 {
+		limit = 50
 	}
 	query += " LIMIT ?"
 	args = append(args, limit)
+
+	if filter.Offset > 0 {
+		query += " OFFSET ?"
+		args = append(args, filter.Offset)
+	}
 
 	rows, err := r.db.QueryContext(ctx, query, args...)
 	if err != nil {
@@ -360,6 +393,20 @@ func (r *IncidentRepo) GetIncidents(ctx context.Context, filter domain.IncidentF
 		incidents = append(incidents, inc)
 	}
 	return incidents, nil
+}
+
+func (r *IncidentRepo) GetIncidentsCount(ctx context.Context, filter domain.IncidentFilter) (int, error) {
+	query := `
+		SELECT COUNT(*)
+		FROM incidents i
+		LEFT JOIN projects p ON i.project_id = p.id
+	`
+	where, args := buildIncidentWhere(filter)
+	query += where
+
+	var count int
+	err := r.db.QueryRowContext(ctx, query, args...).Scan(&count)
+	return count, err
 }
 
 func (r *IncidentRepo) GetIncidentByID(ctx context.Context, id int64) (*domain.Incident, error) {
@@ -424,3 +471,140 @@ func (r *IncidentRepo) CleanOldIncidents(ctx context.Context, daysToKeep int) (i
 
 	return result.RowsAffected()
 }
+
+func (r *IncidentRepo) IgnoreIncident(ctx context.Context, id int64, ignored bool) error {
+	targetStatus := domain.StatusIgnored
+	if !ignored {
+		targetStatus = domain.StatusUnresolved
+	}
+	_, err := r.db.ExecContext(ctx, "UPDATE incidents SET status = ? WHERE id = ?", string(targetStatus), id)
+	return err
+}
+
+func (r *IncidentRepo) DeleteIncident(ctx context.Context, id int64) error {
+	_, err := r.db.ExecContext(ctx, "DELETE FROM incidents WHERE id = ?", id)
+	return err
+}
+
+func (r *IncidentRepo) BatchAction(ctx context.Context, action string, ids []int64, params *domain.ResolveRequest) (int64, error) {
+	if len(ids) == 0 {
+		return 0, nil
+	}
+
+	tx, err := r.db.BeginTx(ctx, nil)
+	if err != nil {
+		return 0, err
+	}
+	defer tx.Rollback()
+
+	placeholders := make([]string, len(ids))
+	args := make([]interface{}, len(ids))
+	for i, id := range ids {
+		placeholders[i] = "?"
+		args[i] = id
+	}
+	inClause := strings.Join(placeholders, ",")
+
+	var affected int64
+	switch action {
+	case "delete":
+		query := fmt.Sprintf("DELETE FROM incidents WHERE id IN (%s)", inClause)
+		res, err := tx.ExecContext(ctx, query, args...)
+		if err != nil {
+			return 0, err
+		}
+		affected, _ = res.RowsAffected()
+
+	case "reopen":
+		query := fmt.Sprintf("UPDATE incidents SET status = 'unresolved', resolved_in_release = NULL, resolved_at = NULL, is_regression = 0 WHERE id IN (%s)", inClause)
+		res, err := tx.ExecContext(ctx, query, args...)
+		if err != nil {
+			return 0, err
+		}
+		affected, _ = res.RowsAffected()
+
+	case "ignore":
+		query := fmt.Sprintf("UPDATE incidents SET status = 'ignored' WHERE id IN (%s)", inClause)
+		res, err := tx.ExecContext(ctx, query, args...)
+		if err != nil {
+			return 0, err
+		}
+		affected, _ = res.RowsAffected()
+
+	case "resolve":
+		resType := "immediate"
+		var targetVersion string
+		if params != nil {
+			if params.Type != "" {
+				resType = params.Type
+			}
+			targetVersion = params.Version
+		}
+
+		resolvedIn := targetVersion
+		if resType == "immediate" || resType == "next" {
+			resolvedIn = resType
+		} else if resType == "current" && resolvedIn == "" {
+			resolvedIn = "current"
+		}
+
+		now := time.Now()
+		query := fmt.Sprintf("UPDATE incidents SET status = 'resolved', resolved_in_release = ?, resolved_at = ?, is_regression = 0 WHERE id IN (%s)", inClause)
+		execArgs := append([]interface{}{resolvedIn, now}, args...)
+		res, err := tx.ExecContext(ctx, query, execArgs...)
+		if err != nil {
+			return 0, err
+		}
+		affected, _ = res.RowsAffected()
+
+	default:
+		return 0, fmt.Errorf("unsupported batch action: %s", action)
+	}
+
+	if err := tx.Commit(); err != nil {
+		return 0, err
+	}
+	return affected, nil
+}
+
+func (r *IncidentRepo) GetStatsSummary(ctx context.Context, projectID int64) (*domain.StatsSummary, error) {
+	summary := &domain.StatsSummary{}
+
+	countQuery := `
+		SELECT 
+			COUNT(*),
+			COALESCE(SUM(CASE WHEN status = 'unresolved' THEN 1 ELSE 0 END), 0),
+			COALESCE(SUM(CASE WHEN status = 'resolved' THEN 1 ELSE 0 END), 0),
+			COALESCE(SUM(CASE WHEN status = 'ignored' THEN 1 ELSE 0 END), 0),
+			COALESCE(SUM(CASE WHEN is_regression = 1 THEN 1 ELSE 0 END), 0)
+		FROM incidents
+		WHERE (? = 0 OR project_id = ?)
+	`
+	err := r.db.QueryRowContext(ctx, countQuery, projectID, projectID).Scan(
+		&summary.TotalIncidents,
+		&summary.Unresolved,
+		&summary.Resolved,
+		&summary.Ignored,
+		&summary.Regressions,
+	)
+	if err != nil {
+		return nil, err
+	}
+
+	eventsQuery := `
+		SELECT COALESCE(SUM(events_count), 0)
+		FROM incidents
+		WHERE (? = 0 OR project_id = ?) AND last_seen_at >= datetime('now', '-24 hours')
+	`
+	_ = r.db.QueryRowContext(ctx, eventsQuery, projectID, projectID).Scan(&summary.EventsLast24H)
+
+	releasesQuery := `
+		SELECT COUNT(DISTINCT version)
+		FROM releases
+		WHERE (? = 0 OR project_id = ?)
+	`
+	_ = r.db.QueryRowContext(ctx, releasesQuery, projectID, projectID).Scan(&summary.ActiveReleasesCount)
+
+	return summary, nil
+}
+

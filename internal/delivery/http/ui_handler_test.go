@@ -29,11 +29,20 @@ type mockReleaseRepo struct{}
 func (m *mockReleaseRepo) UpsertRelease(ctx context.Context, projectID int64, version string) (*domain.Release, error) {
 	return &domain.Release{ID: 1, ProjectID: projectID, Version: version}, nil
 }
+func (m *mockReleaseRepo) CreateRelease(ctx context.Context, projectID int64, version, ref, commit string) (*domain.Release, error) {
+	return &domain.Release{ID: 1, ProjectID: projectID, Version: version, Ref: ref, Commit: commit}, nil
+}
 func (m *mockReleaseRepo) GetLatestRelease(ctx context.Context, projectID int64) (*domain.Release, error) {
 	return &domain.Release{ID: 1, ProjectID: projectID, Version: "v1.2.3"}, nil
 }
 func (m *mockReleaseRepo) GetRelease(ctx context.Context, projectID int64, version string) (*domain.Release, error) {
 	return &domain.Release{ID: 1, ProjectID: projectID, Version: version}, nil
+}
+func (m *mockReleaseRepo) GetReleasesWithStats(ctx context.Context, projectID int64, limit int) ([]domain.ReleaseSummary, error) {
+	return nil, nil
+}
+func (m *mockReleaseRepo) GetIncidentsByRelease(ctx context.Context, projectID int64, version string, newOnly bool) ([]domain.Incident, error) {
+	return nil, nil
 }
 
 type mockIncidentRepo struct {
@@ -48,6 +57,9 @@ func (m *mockIncidentRepo) GetLatestIncidents(ctx context.Context, projectID int
 }
 func (m *mockIncidentRepo) GetIncidents(ctx context.Context, filter domain.IncidentFilter) ([]domain.Incident, error) {
 	return []domain.Incident{*m.incident}, nil
+}
+func (m *mockIncidentRepo) GetIncidentsCount(ctx context.Context, filter domain.IncidentFilter) (int, error) {
+	return 1, nil
 }
 func (m *mockIncidentRepo) GetIncidentByID(ctx context.Context, id int64) (*domain.Incident, error) {
 	return m.incident, nil
@@ -64,6 +76,19 @@ func (m *mockIncidentRepo) ResolveIncident(ctx context.Context, id int64, resolu
 func (m *mockIncidentRepo) ReopenIncident(ctx context.Context, id int64) error {
 	return nil
 }
+func (m *mockIncidentRepo) IgnoreIncident(ctx context.Context, id int64, ignored bool) error {
+	return nil
+}
+func (m *mockIncidentRepo) DeleteIncident(ctx context.Context, id int64) error {
+	return nil
+}
+func (m *mockIncidentRepo) BatchAction(ctx context.Context, action string, ids []int64, params *domain.ResolveRequest) (int64, error) {
+	return int64(len(ids)), nil
+}
+func (m *mockIncidentRepo) GetStatsSummary(ctx context.Context, projectID int64) (*domain.StatsSummary, error) {
+	return &domain.StatsSummary{TotalIncidents: 1}, nil
+}
+
 
 func TestHandleIncidentDetail_WithStackTraceFilter(t *testing.T) {
 	sampleTrace := `#0 /var/www/html/vendor/laravel/framework/src/Illuminate/Database/Connection.php(712): Illuminate\Database\Connection->runQueryCallback()

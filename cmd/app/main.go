@@ -102,12 +102,41 @@ func main() {
 		}
 	}
 	apiHandler := deliveryHttp.NewAPIHandler(projectRepo, incidentRepo, eventChan, allowedIPs)
+	apiHandler.SetReleaseRepo(releaseRepo)
+	apiHandler.SetSSEBroker(sseBroker)
+
+	processor.SetOnJSONEvent(func(eventType string, data any) {
+		sseBroker.BroadcastJSON(eventType, data)
+	})
 
 	mux := http.NewServeMux()
-	mux.HandleFunc("/api/events", apiHandler.HandleEvent)
-	mux.HandleFunc("/api/incidents", apiHandler.HandleListIncidents)
-	mux.HandleFunc("/api/incidents/", apiHandler.HandleIncidentAction)
+
+	// 1. Ingestion routes
+	mux.HandleFunc("POST /api/events", apiHandler.HandleEvent)
+	mux.HandleFunc("POST /api/events/batch", apiHandler.HandleBatchEvents)
+
+	// 2. Incidents routes
+	mux.HandleFunc("GET /api/incidents", apiHandler.HandleListIncidents)
+	mux.HandleFunc("POST /api/incidents/batch", apiHandler.HandleBatchIncidents)
+	mux.HandleFunc("GET /api/incidents/{id}", apiHandler.HandleGetIncident)
+	mux.HandleFunc("DELETE /api/incidents/{id}", apiHandler.HandleDeleteIncident)
+	mux.HandleFunc("POST /api/incidents/{id}/resolve", apiHandler.HandleResolveIncident)
+	mux.HandleFunc("POST /api/incidents/{id}/reopen", apiHandler.HandleReopenIncident)
+	mux.HandleFunc("POST /api/incidents/{id}/ignore", apiHandler.HandleIgnoreIncident)
+
+	// 3. Releases routes
+	mux.HandleFunc("GET /api/releases", apiHandler.HandleListReleases)
+	mux.HandleFunc("POST /api/releases", apiHandler.HandleCreateRelease)
+	mux.HandleFunc("GET /api/releases/{version}/incidents", apiHandler.HandleReleaseIncidents)
+
+	// 4. Analytics & System
+	mux.HandleFunc("GET /api/stats/summary", apiHandler.HandleStatsSummary)
+	mux.HandleFunc("GET /api/events/stream", apiHandler.HandleEventsStreamJSON)
+	mux.HandleFunc("GET /api/health", apiHandler.HandleHealthCheck)
+
+	// Swagger documentation
 	mux.HandleFunc("/swagger/", httpSwagger.WrapHandler)
+
 
 	// UI routes
 	mux.HandleFunc("/ui", uiHandler.HandleIndex)

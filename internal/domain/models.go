@@ -13,22 +13,34 @@ const (
 	StatusIgnored    IncidentStatus = "ignored"
 )
 
+// UserContext represents the authenticated user details during the error
+type UserContext struct {
+	ID        string `json:"id,omitempty"`
+	Email     string `json:"email,omitempty"`
+	IPAddress string `json:"ip_address,omitempty"`
+}
+
 // EventPayload represents the incoming JSON from Laravel
 type EventPayload struct {
-	Release        string `json:"release"`
-	Environment    string `json:"environment"`
-	ExceptionClass string `json:"exception_class"`
-	Message        string `json:"message"`
-	File           string `json:"file"`
-	Line           int    `json:"line"`
-	StackTrace     string `json:"stack_trace"`
-	AppURL         string `json:"app_url"`
-	RequestURL     string `json:"request_url"`
-	RequestMethod  string `json:"request_method"`
+	Release        string            `json:"release"`
+	Environment    string            `json:"environment"`
+	ExceptionClass string            `json:"exception_class"`
+	Message        string            `json:"message"`
+	File           string            `json:"file"`
+	Line           int               `json:"line"`
+	StackTrace     string            `json:"stack_trace"`
+	AppURL         string            `json:"app_url"`
+	RequestURL     string            `json:"request_url"`
+	RequestMethod  string            `json:"request_method"`
+	Level          string            `json:"level,omitempty"`
+	User           *UserContext      `json:"user,omitempty"`
+	Tags           map[string]string `json:"tags,omitempty"`
+	Fingerprint    []string          `json:"fingerprint,omitempty"`
 }
 
 // IncomingEvent represents an internal event passed through the channel
 type IncomingEvent struct {
+	EventID     string
 	ProjectID   int64
 	ProjectName string
 	ProjectKey  string
@@ -37,51 +49,125 @@ type IncomingEvent struct {
 
 // Project represents a client application
 type Project struct {
-	ID     int64
-	Name   string
-	APIKey string
+	ID     int64  `json:"id"`
+	Name   string `json:"name"`
+	APIKey string `json:"api_key"`
 }
 
 // Release represents a tracked application version
 type Release struct {
-	ID        int64
-	ProjectID int64
-	Version   string
-	CreatedAt time.Time
+	ID        int64     `json:"id"`
+	ProjectID int64     `json:"project_id"`
+	Version   string    `json:"version"`
+	Ref       string    `json:"ref,omitempty"`
+	Commit    string    `json:"commit,omitempty"`
+	CreatedAt time.Time `json:"created_at"`
 }
 
 // Incident represents a grouped error in the database
 type Incident struct {
-	ID                int64
-	ProjectID         int64
-	ProjectName       string
-	Hash              string
-	ExceptionClass    string
-	Message           string
-	File              string
-	Line              int
-	StackTrace        string
-	AppURL            string
-	RequestURL        string
-	EventsCount       int
-	FirstSeenAt       time.Time
-	LastSeenAt        time.Time
-	Environment       string
-	FirstRelease      string
-	LastRelease       string
-	Status            IncidentStatus
-	ResolvedInRelease string
-	ResolvedAt        *time.Time
-	IsRegression      bool
+	ID                int64          `json:"id"`
+	ProjectID         int64          `json:"project_id"`
+	ProjectName       string         `json:"project_name"`
+	Hash              string         `json:"hash"`
+	ExceptionClass    string         `json:"exception_class"`
+	Message           string         `json:"message"`
+	File              string         `json:"file"`
+	Line              int            `json:"line"`
+	StackTrace        string         `json:"stack_trace,omitempty"`
+	AppURL            string         `json:"app_url"`
+	RequestURL        string         `json:"request_url"`
+	EventsCount       int            `json:"events_count"`
+	FirstSeenAt       time.Time      `json:"first_seen_at"`
+	LastSeenAt        time.Time      `json:"last_seen_at"`
+	Environment       string         `json:"environment"`
+	FirstRelease      string         `json:"first_release"`
+	LastRelease       string         `json:"last_release"`
+	Status            IncidentStatus `json:"status"`
+	ResolvedInRelease string         `json:"resolved_in_release,omitempty"`
+	ResolvedAt        *time.Time     `json:"resolved_at,omitempty"`
+	IsRegression      bool           `json:"is_regression"`
+}
+
+// IncidentDetail represents extended incident view with parsed stack frames
+type IncidentDetail struct {
+	Incident
+	AppStackTrace   string          `json:"app_stack_trace"`
+	StackTraceStats StackTraceStats `json:"stack_trace_stats"`
 }
 
 // IncidentFilter represents parameters for filtering incidents
 type IncidentFilter struct {
-	ProjectID int64
-	Query     string
-	Status    string // "unresolved", "resolved", "all"
-	Sort      string // "recent", "count"
-	Limit     int
+	ProjectID    int64
+	Query        string
+	Status       string // "unresolved", "resolved", "ignored", "all"
+	Environment  string
+	Release      string
+	IsRegression *bool
+	Sort         string // "recent", "count", "first_seen"
+	Limit        int
+	Offset       int
+}
+
+// PageMeta contains pagination metadata
+type PageMeta struct {
+	Total      int `json:"total"`
+	Page       int `json:"page"`
+	Limit      int `json:"limit"`
+	TotalPages int `json:"total_pages"`
+}
+
+// IncidentListResponse wraps incident results with pagination
+type IncidentListResponse struct {
+	Items []Incident `json:"items"`
+	Meta  PageMeta   `json:"meta"`
+}
+
+// ResolveRequest represents parameters for resolving an incident
+type ResolveRequest struct {
+	Type    string `json:"type"`    // "immediate", "next", "current", "version"
+	Version string `json:"version"` // target version if type == "version"
+}
+
+// BatchIncidentsRequest represents parameters for batch updates
+type BatchIncidentsRequest struct {
+	Action string          `json:"action"` // "resolve", "reopen", "ignore", "delete"
+	IDs    []int64         `json:"ids"`
+	Params *ResolveRequest `json:"params,omitempty"`
+}
+
+// CreateReleaseRequest represents parameters for registering a release from CI/CD
+type CreateReleaseRequest struct {
+	Version string `json:"version"`
+	Ref     string `json:"ref,omitempty"`
+	Commit  string `json:"commit,omitempty"`
+}
+
+// ReleaseSummary contains release info along with incident counts
+type ReleaseSummary struct {
+	Release
+	TotalIncidents   int `json:"total_incidents"`
+	NewIncidents     int `json:"new_incidents"`
+	RegressionsCount int `json:"regressions_count"`
+}
+
+// StatsSummary contains high-level metrics for dashboard
+type StatsSummary struct {
+	TotalIncidents      int `json:"total_incidents"`
+	Unresolved          int `json:"unresolved"`
+	Resolved            int `json:"resolved"`
+	Ignored             int `json:"ignored"`
+	Regressions         int `json:"regressions"`
+	EventsLast24H       int `json:"events_last_24h"`
+	ActiveReleasesCount int `json:"active_releases_count"`
+}
+
+// HealthStatus contains system health diagnostics
+type HealthStatus struct {
+	Status    string `json:"status"`
+	Database  string `json:"database"`
+	QueueSize int    `json:"queue_size"`
+	Uptime    string `json:"uptime"`
 }
 
 // UpsertResult contains the outcome of an event upsert
@@ -104,8 +190,11 @@ type ProjectRepository interface {
 // ReleaseRepository describes operations for releases
 type ReleaseRepository interface {
 	UpsertRelease(ctx context.Context, projectID int64, version string) (*Release, error)
+	CreateRelease(ctx context.Context, projectID int64, version, ref, commit string) (*Release, error)
 	GetLatestRelease(ctx context.Context, projectID int64) (*Release, error)
 	GetRelease(ctx context.Context, projectID int64, version string) (*Release, error)
+	GetReleasesWithStats(ctx context.Context, projectID int64, limit int) ([]ReleaseSummary, error)
+	GetIncidentsByRelease(ctx context.Context, projectID int64, version string, newOnly bool) ([]Incident, error)
 }
 
 // IncidentRepository describes operations for incidents
@@ -113,14 +202,20 @@ type IncidentRepository interface {
 	UpsertIncident(ctx context.Context, event IncomingEvent, hash string) (*UpsertResult, error)
 	GetLatestIncidents(ctx context.Context, projectID int64, limit int) ([]Incident, error)
 	GetIncidents(ctx context.Context, filter IncidentFilter) ([]Incident, error)
+	GetIncidentsCount(ctx context.Context, filter IncidentFilter) (int, error)
 	GetIncidentByID(ctx context.Context, id int64) (*Incident, error)
 	CountIncidents(ctx context.Context, projectID int64, status string) (int, error)
 	CleanOldIncidents(ctx context.Context, daysToKeep int) (int64, error)
 	ResolveIncident(ctx context.Context, id int64, resolutionType string, targetVersion string) error
 	ReopenIncident(ctx context.Context, id int64) error
+	IgnoreIncident(ctx context.Context, id int64, ignored bool) error
+	DeleteIncident(ctx context.Context, id int64) error
+	BatchAction(ctx context.Context, action string, ids []int64, params *ResolveRequest) (int64, error)
+	GetStatsSummary(ctx context.Context, projectID int64) (*StatsSummary, error)
 }
 
 // AlertSender abstracts notification sending
 type AlertSender interface {
 	SendMessage(ctx context.Context, text string) error
 }
+

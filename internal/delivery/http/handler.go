@@ -2,20 +2,29 @@ package http
 
 import (
 	"encoding/json"
+	"fmt"
 	"log"
 	"net"
 	"net/http"
 	"strconv"
 	"strings"
+	"time"
 
+	"github.com/google/uuid"
+
+	"server/internal/delivery/sse"
 	"server/internal/domain"
+	"server/internal/usecase"
 )
 
 type APIHandler struct {
 	projectRepo  domain.ProjectRepository
 	incidentRepo domain.IncidentRepository
+	releaseRepo  domain.ReleaseRepository
+	sseBroker    *sse.Broker
 	eventChan    chan domain.IncomingEvent
 	allowedIPs   []string
+	startTime    time.Time
 }
 
 func NewAPIHandler(
@@ -29,7 +38,16 @@ func NewAPIHandler(
 		incidentRepo: incidentRepo,
 		eventChan:    eventChan,
 		allowedIPs:   allowedIPs,
+		startTime:    time.Now(),
 	}
+}
+
+func (h *APIHandler) SetReleaseRepo(repo domain.ReleaseRepository) {
+	h.releaseRepo = repo
+}
+
+func (h *APIHandler) SetSSEBroker(broker *sse.Broker) {
+	h.sseBroker = broker
 }
 
 func getClientIP(r *http.Request) string {
@@ -46,61 +64,94 @@ func getClientIP(r *http.Request) string {
 	return ip
 }
 
-// HandleEvent godoc
-// @Summary Send a new error event
-// @Description Receives an exception/error payload from a Laravel application.
-// @Tags events
-// @Accept  json
-// @Produce  json
-// @Security Bearer
-// @Param payload body domain.EventPayload true "Event Payload"
-// @Success 202 {object} map[string]string
-// @Failure 400 {string} string "Bad Request"
-// @Failure 401 {string} string "Unauthorized"
-// @Failure 403 {string} string "Forbidden"
-// @Failure 405 {string} string "Method Not Allowed"
-// @Router /api/events [post]
-func (h *APIHandler) HandleEvent(w http.ResponseWriter, r *http.Request) {
-	if r.Method != http.MethodPost {
-		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
-		return
+func (h *APIHandler) checkIPAllowed(r *http.Request) bool {
+	if len(h.allowedIPs) == 0 {
+		return true
 	}
-
-	if len(h.allowedIPs) > 0 {
-		clientIP := getClientIP(r)
-		allowed := false
-		for _, ip := range h.allowedIPs {
-			if ip == clientIP {
-				allowed = true
-				break
-			}
-		}
-		if !allowed {
-			http.Error(w, "Forbidden - IP not allowed", http.StatusForbidden)
-			return
+	clientIP := getClientIP(r)
+	for _, ip := range h.allowedIPs {
+		if ip == clientIP {
+			return true
 		}
 	}
+	return false
+}
 
+func (h *APIHandler) authenticate(r *http.Request) (*domain.Project, error) {
 	authHeader := r.Header.Get("Authorization")
-	if authHeader == "" || !strings.HasPrefix(authHeader, "Bearer ") {
-		http.Error(w, "Unauthorized", http.StatusUnauthorized)
-		return
+	var apiKey string
+	if authHeader != "" && strings.HasPrefix(authHeader, "Bearer ") {
+		apiKey = strings.TrimPrefix(authHeader, "Bearer ")
+	} else {
+		// Fallback for EventSource query param authentication
+		apiKey = r.URL.Query().Get("token")
 	}
-	apiKey := strings.TrimPrefix(authHeader, "Bearer ")
+
+	apiKey = strings.TrimSpace(apiKey)
+	if apiKey == "" {
+		return nil, fmt.Errorf("missing authorization token")
+	}
 
 	project, err := h.projectRepo.GetByKey(r.Context(), apiKey)
+	if err != nil || project == nil {
+		return nil, fmt.Errorf("invalid API key")
+	}
+	return project, nil
+}
+
+func writeJSON(w http.ResponseWriter, status int, data any) {
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(status)
+	_ = json.NewEncoder(w).Encode(data)
+}
+
+func writeError(w http.ResponseWriter, status int, errMessage string) {
+	writeJSON(w, status, map[string]string{"error": errMessage})
+}
+
+func getPathParam(r *http.Request, key string) string {
+	if val := r.PathValue(key); val != "" {
+		return val
+	}
+	// Fallback path segment parsing
+	parts := strings.Split(strings.Trim(r.URL.Path, "/"), "/")
+	if key == "id" && len(parts) >= 3 && parts[1] == "incidents" {
+		return parts[2]
+	}
+	if key == "version" && len(parts) >= 3 && parts[1] == "releases" {
+		return parts[2]
+	}
+	return ""
+}
+
+// =============================================================================
+// 1. EVENT INGESTION
+// =============================================================================
+
+// HandleEvent handles POST /api/events
+func (h *APIHandler) HandleEvent(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		writeError(w, http.StatusMethodNotAllowed, "Method not allowed")
+		return
+	}
+
+	if !h.checkIPAllowed(r) {
+		writeError(w, http.StatusForbidden, "Forbidden - IP not allowed")
+		return
+	}
+
+	project, err := h.authenticate(r)
 	if err != nil {
-		http.Error(w, "Unauthorized - Invalid API Key", http.StatusUnauthorized)
+		writeError(w, http.StatusUnauthorized, "Unauthorized - "+err.Error())
 		return
 	}
 
 	var payload domain.EventPayload
 	if err := json.NewDecoder(r.Body).Decode(&payload); err != nil {
-		http.Error(w, "Bad Request - Invalid JSON", http.StatusBadRequest)
+		writeError(w, http.StatusBadRequest, "Bad Request - Invalid JSON")
 		return
 	}
 
-	// Trim incoming strings
 	payload.Release = strings.TrimSpace(payload.Release)
 	payload.Environment = strings.TrimSpace(payload.Environment)
 	payload.Message = strings.TrimSpace(payload.Message)
@@ -111,130 +162,676 @@ func (h *APIHandler) HandleEvent(w http.ResponseWriter, r *http.Request) {
 	payload.StackTrace = strings.TrimSpace(payload.StackTrace)
 
 	if payload.ExceptionClass == "" || payload.Message == "" {
-		http.Error(w, "Bad Request - Missing exception_class or message", http.StatusBadRequest)
+		writeError(w, http.StatusBadRequest, "Bad Request - Missing exception_class or message")
 		return
 	}
 
+	eventID := uuid.New().String()
+	hash := usecase.CalculateHash(project.APIKey, payload)
+
 	h.eventChan <- domain.IncomingEvent{
+		EventID:     eventID,
 		ProjectID:   project.ID,
 		ProjectName: project.Name,
-		ProjectKey:  apiKey,
+		ProjectKey:  project.APIKey,
 		Payload:     payload,
 	}
 
-	log.Printf("Received event for project %s (%d): %s\n", project.Name, project.ID, payload.ExceptionClass)
+	log.Printf("[Event] Received event %s for project %s (%d): %s\n", eventID, project.Name, project.ID, payload.ExceptionClass)
 
-	w.Header().Set("Content-Type", "application/json")
-	w.WriteHeader(http.StatusAccepted)
-	w.Write([]byte(`{"status":"accepted"}`))
+	writeJSON(w, http.StatusAccepted, map[string]string{
+		"status":   "accepted",
+		"event_id": eventID,
+		"hash":     hash,
+	})
 }
 
-// HandleListIncidents godoc
-// @Summary List incidents
-// @Description Returns the latest 100 grouped incidents for the authenticated project.
-// @Tags incidents
-// @Produce  json
-// @Security Bearer
-// @Success 200 {array} domain.Incident
-// @Failure 401 {string} string "Unauthorized"
-// @Failure 405 {string} string "Method Not Allowed"
-// @Failure 500 {string} string "Internal Server Error"
-// @Router /api/incidents [get]
+// HandleBatchEvents handles POST /api/events/batch
+func (h *APIHandler) HandleBatchEvents(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		writeError(w, http.StatusMethodNotAllowed, "Method not allowed")
+		return
+	}
+
+	if !h.checkIPAllowed(r) {
+		writeError(w, http.StatusForbidden, "Forbidden - IP not allowed")
+		return
+	}
+
+	project, err := h.authenticate(r)
+	if err != nil {
+		writeError(w, http.StatusUnauthorized, "Unauthorized - "+err.Error())
+		return
+	}
+
+	var req struct {
+		Events []domain.EventPayload `json:"events"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		writeError(w, http.StatusBadRequest, "Bad Request - Invalid JSON")
+		return
+	}
+
+	if len(req.Events) == 0 {
+		writeError(w, http.StatusBadRequest, "Bad Request - No events provided")
+		return
+	}
+	if len(req.Events) > 50 {
+		writeError(w, http.StatusBadRequest, "Bad Request - Batch exceeds maximum size of 50")
+		return
+	}
+
+	acceptedCount := 0
+	for _, payload := range req.Events {
+		payload.Release = strings.TrimSpace(payload.Release)
+		payload.Environment = strings.TrimSpace(payload.Environment)
+		payload.Message = strings.TrimSpace(payload.Message)
+		payload.ExceptionClass = strings.TrimSpace(payload.ExceptionClass)
+		payload.File = strings.TrimSpace(payload.File)
+		payload.AppURL = strings.TrimSpace(payload.AppURL)
+		payload.RequestURL = strings.TrimSpace(payload.RequestURL)
+		payload.StackTrace = strings.TrimSpace(payload.StackTrace)
+
+		if payload.ExceptionClass == "" || payload.Message == "" {
+			continue
+		}
+
+		eventID := uuid.New().String()
+		h.eventChan <- domain.IncomingEvent{
+			EventID:     eventID,
+			ProjectID:   project.ID,
+			ProjectName: project.Name,
+			ProjectKey:  project.APIKey,
+			Payload:     payload,
+		}
+		acceptedCount++
+	}
+
+	writeJSON(w, http.StatusAccepted, map[string]any{
+		"status":         "accepted",
+		"accepted_count": acceptedCount,
+	})
+}
+
+// =============================================================================
+// 2. INCIDENTS API
+// =============================================================================
+
+// HandleListIncidents handles GET /api/incidents
 func (h *APIHandler) HandleListIncidents(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodGet {
-		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		writeError(w, http.StatusMethodNotAllowed, "Method not allowed")
 		return
 	}
 
-	authHeader := r.Header.Get("Authorization")
-	if authHeader == "" || !strings.HasPrefix(authHeader, "Bearer ") {
-		http.Error(w, "Unauthorized", http.StatusUnauthorized)
-		return
-	}
-	apiKey := strings.TrimPrefix(authHeader, "Bearer ")
-
-	projectID, err := h.projectRepo.GetIDByKey(r.Context(), apiKey)
+	project, err := h.authenticate(r)
 	if err != nil {
-		http.Error(w, "Unauthorized", http.StatusUnauthorized)
+		writeError(w, http.StatusUnauthorized, "Unauthorized - "+err.Error())
 		return
 	}
 
-	incidents, err := h.incidentRepo.GetLatestIncidents(r.Context(), projectID, 100)
+	q := r.URL.Query()
+	status := strings.TrimSpace(q.Get("status"))
+	if status == "" {
+		status = "unresolved"
+	}
+
+	queryStr := strings.TrimSpace(q.Get("q"))
+	environment := strings.TrimSpace(q.Get("environment"))
+	release := strings.TrimSpace(q.Get("release"))
+	sort := strings.TrimSpace(q.Get("sort"))
+	if sort == "" {
+		sort = "recent"
+	}
+
+	page := 1
+	if pStr := q.Get("page"); pStr != "" {
+		if p, err := strconv.Atoi(pStr); err == nil && p > 0 {
+			page = p
+		}
+	}
+
+	limit := 50
+	if lStr := q.Get("limit"); lStr != "" {
+		if l, err := strconv.Atoi(lStr); err == nil && l > 0 {
+			limit = l
+		}
+	}
+	if limit > 200 {
+		limit = 200
+	}
+
+	var isRegression *bool
+	if regStr := q.Get("is_regression"); regStr != "" {
+		val := regStr == "true" || regStr == "1"
+		isRegression = &val
+	}
+
+	includeTrace := q.Get("include_trace") == "true" || q.Get("include_trace") == "1"
+
+	offset := (page - 1) * limit
+	filter := domain.IncidentFilter{
+		ProjectID:    project.ID,
+		Status:       status,
+		Query:        queryStr,
+		Environment:  environment,
+		Release:      release,
+		IsRegression: isRegression,
+		Sort:         sort,
+		Limit:        limit,
+		Offset:       offset,
+	}
+
+	incidents, err := h.incidentRepo.GetIncidents(r.Context(), filter)
 	if err != nil {
-		http.Error(w, "Internal Server Error", http.StatusInternalServerError)
+		writeError(w, http.StatusInternalServerError, "Internal Server Error: "+err.Error())
 		return
 	}
 
-	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(incidents)
+	total, err := h.incidentRepo.GetIncidentsCount(r.Context(), filter)
+	if err != nil {
+		total = len(incidents)
+	}
+
+	// Optimize bandwidth: strip stack traces if not requested
+	if !includeTrace {
+		for i := range incidents {
+			incidents[i].StackTrace = ""
+		}
+	}
+
+	totalPages := 0
+	if total > 0 {
+		totalPages = (total + limit - 1) / limit
+	}
+
+	writeJSON(w, http.StatusOK, domain.IncidentListResponse{
+		Items: incidents,
+		Meta: domain.PageMeta{
+			Total:      total,
+			Page:       page,
+			Limit:      limit,
+			TotalPages: totalPages,
+		},
+	})
 }
 
-// HandleIncidentAction handles /api/incidents/{id}/resolve and /api/incidents/{id}/reopen
-func (h *APIHandler) HandleIncidentAction(w http.ResponseWriter, r *http.Request) {
+// HandleGetIncident handles GET /api/incidents/{id}
+func (h *APIHandler) HandleGetIncident(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		writeError(w, http.StatusMethodNotAllowed, "Method not allowed")
+		return
+	}
+
+	project, err := h.authenticate(r)
+	if err != nil {
+		writeError(w, http.StatusUnauthorized, "Unauthorized - "+err.Error())
+		return
+	}
+
+	idStr := getPathParam(r, "id")
+	id, err := strconv.ParseInt(idStr, 10, 64)
+	if err != nil {
+		writeError(w, http.StatusBadRequest, "Invalid incident ID")
+		return
+	}
+
+	inc, err := h.incidentRepo.GetIncidentByID(r.Context(), id)
+	if err != nil || inc == nil {
+		writeError(w, http.StatusNotFound, "Incident not found")
+		return
+	}
+
+	if inc.ProjectID != project.ID {
+		writeError(w, http.StatusForbidden, "Forbidden")
+		return
+	}
+
+	detail := domain.IncidentDetail{
+		Incident:        *inc,
+		AppStackTrace:   inc.AppStackTrace(),
+		StackTraceStats: inc.StackTraceStats(),
+	}
+
+	writeJSON(w, http.StatusOK, detail)
+}
+
+// HandleResolveIncident handles POST /api/incidents/{id}/resolve
+func (h *APIHandler) HandleResolveIncident(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
-		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		writeError(w, http.StatusMethodNotAllowed, "Method not allowed")
 		return
 	}
 
-	authHeader := r.Header.Get("Authorization")
-	if authHeader == "" || !strings.HasPrefix(authHeader, "Bearer ") {
-		http.Error(w, "Unauthorized", http.StatusUnauthorized)
-		return
-	}
-	apiKey := strings.TrimPrefix(authHeader, "Bearer ")
-
-	projectID, err := h.projectRepo.GetIDByKey(r.Context(), apiKey)
+	project, err := h.authenticate(r)
 	if err != nil {
-		http.Error(w, "Unauthorized", http.StatusUnauthorized)
+		writeError(w, http.StatusUnauthorized, "Unauthorized - "+err.Error())
 		return
 	}
 
-	pathParts := strings.Split(strings.Trim(r.URL.Path, "/"), "/")
-	if len(pathParts) < 4 {
-		http.Error(w, "Invalid path", http.StatusBadRequest)
-		return
-	}
-
-	id, err := strconv.ParseInt(pathParts[2], 10, 64)
+	idStr := getPathParam(r, "id")
+	id, err := strconv.ParseInt(idStr, 10, 64)
 	if err != nil {
-		http.Error(w, "Invalid incident ID", http.StatusBadRequest)
+		writeError(w, http.StatusBadRequest, "Invalid incident ID")
 		return
 	}
 
-	action := pathParts[3]
-	incident, err := h.incidentRepo.GetIncidentByID(r.Context(), id)
-	if err != nil || incident == nil {
-		http.Error(w, "Incident not found", http.StatusNotFound)
+	inc, err := h.incidentRepo.GetIncidentByID(r.Context(), id)
+	if err != nil || inc == nil {
+		writeError(w, http.StatusNotFound, "Incident not found")
+		return
+	}
+	if inc.ProjectID != project.ID {
+		writeError(w, http.StatusForbidden, "Forbidden")
 		return
 	}
 
-	if incident.ProjectID != projectID {
-		http.Error(w, "Forbidden", http.StatusForbidden)
+	var req domain.ResolveRequest
+	_ = json.NewDecoder(r.Body).Decode(&req)
+	if req.Type == "" {
+		req.Type = r.URL.Query().Get("type")
+	}
+	if req.Type == "" {
+		req.Type = "immediate"
+	}
+	if req.Version == "" {
+		req.Version = r.URL.Query().Get("version")
+	}
+
+	if err := h.incidentRepo.ResolveIncident(r.Context(), id, req.Type, req.Version); err != nil {
+		writeError(w, http.StatusInternalServerError, "Failed to resolve incident: "+err.Error())
 		return
 	}
 
-	if action == "resolve" {
-		resType := r.URL.Query().Get("type")
-		if resType == "" {
-			resType = "immediate"
+	updated, _ := h.incidentRepo.GetIncidentByID(r.Context(), id)
+	writeJSON(w, http.StatusOK, updated)
+}
+
+// HandleReopenIncident handles POST /api/incidents/{id}/reopen
+func (h *APIHandler) HandleReopenIncident(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		writeError(w, http.StatusMethodNotAllowed, "Method not allowed")
+		return
+	}
+
+	project, err := h.authenticate(r)
+	if err != nil {
+		writeError(w, http.StatusUnauthorized, "Unauthorized - "+err.Error())
+		return
+	}
+
+	idStr := getPathParam(r, "id")
+	id, err := strconv.ParseInt(idStr, 10, 64)
+	if err != nil {
+		writeError(w, http.StatusBadRequest, "Invalid incident ID")
+		return
+	}
+
+	inc, err := h.incidentRepo.GetIncidentByID(r.Context(), id)
+	if err != nil || inc == nil {
+		writeError(w, http.StatusNotFound, "Incident not found")
+		return
+	}
+	if inc.ProjectID != project.ID {
+		writeError(w, http.StatusForbidden, "Forbidden")
+		return
+	}
+
+	if err := h.incidentRepo.ReopenIncident(r.Context(), id); err != nil {
+		writeError(w, http.StatusInternalServerError, "Failed to reopen incident: "+err.Error())
+		return
+	}
+
+	updated, _ := h.incidentRepo.GetIncidentByID(r.Context(), id)
+	writeJSON(w, http.StatusOK, updated)
+}
+
+// HandleIgnoreIncident handles POST /api/incidents/{id}/ignore
+func (h *APIHandler) HandleIgnoreIncident(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		writeError(w, http.StatusMethodNotAllowed, "Method not allowed")
+		return
+	}
+
+	project, err := h.authenticate(r)
+	if err != nil {
+		writeError(w, http.StatusUnauthorized, "Unauthorized - "+err.Error())
+		return
+	}
+
+	idStr := getPathParam(r, "id")
+	id, err := strconv.ParseInt(idStr, 10, 64)
+	if err != nil {
+		writeError(w, http.StatusBadRequest, "Invalid incident ID")
+		return
+	}
+
+	inc, err := h.incidentRepo.GetIncidentByID(r.Context(), id)
+	if err != nil || inc == nil {
+		writeError(w, http.StatusNotFound, "Incident not found")
+		return
+	}
+	if inc.ProjectID != project.ID {
+		writeError(w, http.StatusForbidden, "Forbidden")
+		return
+	}
+
+	var req struct {
+		Ignored *bool `json:"ignored"`
+	}
+	_ = json.NewDecoder(r.Body).Decode(&req)
+	ignored := true
+	if req.Ignored != nil {
+		ignored = *req.Ignored
+	}
+
+	if err := h.incidentRepo.IgnoreIncident(r.Context(), id, ignored); err != nil {
+		writeError(w, http.StatusInternalServerError, "Failed to ignore incident: "+err.Error())
+		return
+	}
+
+	updated, _ := h.incidentRepo.GetIncidentByID(r.Context(), id)
+	writeJSON(w, http.StatusOK, updated)
+}
+
+// HandleDeleteIncident handles DELETE /api/incidents/{id}
+func (h *APIHandler) HandleDeleteIncident(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodDelete {
+		writeError(w, http.StatusMethodNotAllowed, "Method not allowed")
+		return
+	}
+
+	project, err := h.authenticate(r)
+	if err != nil {
+		writeError(w, http.StatusUnauthorized, "Unauthorized - "+err.Error())
+		return
+	}
+
+	idStr := getPathParam(r, "id")
+	id, err := strconv.ParseInt(idStr, 10, 64)
+	if err != nil {
+		writeError(w, http.StatusBadRequest, "Invalid incident ID")
+		return
+	}
+
+	inc, err := h.incidentRepo.GetIncidentByID(r.Context(), id)
+	if err != nil || inc == nil {
+		writeError(w, http.StatusNotFound, "Incident not found")
+		return
+	}
+	if inc.ProjectID != project.ID {
+		writeError(w, http.StatusForbidden, "Forbidden")
+		return
+	}
+
+	if err := h.incidentRepo.DeleteIncident(r.Context(), id); err != nil {
+		writeError(w, http.StatusInternalServerError, "Failed to delete incident: "+err.Error())
+		return
+	}
+
+	w.WriteHeader(http.StatusNoContent)
+}
+
+// HandleBatchIncidents handles POST /api/incidents/batch
+func (h *APIHandler) HandleBatchIncidents(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		writeError(w, http.StatusMethodNotAllowed, "Method not allowed")
+		return
+	}
+
+	project, err := h.authenticate(r)
+	if err != nil {
+		writeError(w, http.StatusUnauthorized, "Unauthorized - "+err.Error())
+		return
+	}
+
+	var req domain.BatchIncidentsRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		writeError(w, http.StatusBadRequest, "Bad Request - Invalid JSON")
+		return
+	}
+
+	if len(req.IDs) == 0 {
+		writeError(w, http.StatusBadRequest, "Bad Request - IDs array is empty")
+		return
+	}
+
+	// Filter IDs to only those belonging to authenticated project
+	var verifiedIDs []int64
+	for _, id := range req.IDs {
+		inc, err := h.incidentRepo.GetIncidentByID(r.Context(), id)
+		if err == nil && inc != nil && inc.ProjectID == project.ID {
+			verifiedIDs = append(verifiedIDs, id)
 		}
-		version := r.URL.Query().Get("version")
-		if err := h.incidentRepo.ResolveIncident(r.Context(), id, resType, version); err != nil {
-			http.Error(w, "Internal Server Error", http.StatusInternalServerError)
+	}
+
+	if len(verifiedIDs) == 0 {
+		writeError(w, http.StatusNotFound, "No matching incidents found for project")
+		return
+	}
+
+	affected, err := h.incidentRepo.BatchAction(r.Context(), req.Action, verifiedIDs, req.Params)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "Batch action failed: "+err.Error())
+		return
+	}
+
+	writeJSON(w, http.StatusOK, map[string]any{
+		"action":   req.Action,
+		"affected": affected,
+	})
+}
+
+// =============================================================================
+// 3. RELEASES API
+// =============================================================================
+
+// HandleListReleases handles GET /api/releases
+func (h *APIHandler) HandleListReleases(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		writeError(w, http.StatusMethodNotAllowed, "Method not allowed")
+		return
+	}
+
+	project, err := h.authenticate(r)
+	if err != nil {
+		writeError(w, http.StatusUnauthorized, "Unauthorized - "+err.Error())
+		return
+	}
+
+	if h.releaseRepo == nil {
+		writeError(w, http.StatusInternalServerError, "Release repository not configured")
+		return
+	}
+
+	limit := 20
+	if lStr := r.URL.Query().Get("limit"); lStr != "" {
+		if l, err := strconv.Atoi(lStr); err == nil && l > 0 {
+			limit = l
+		}
+	}
+
+	releases, err := h.releaseRepo.GetReleasesWithStats(r.Context(), project.ID, limit)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "Failed to load releases: "+err.Error())
+		return
+	}
+
+	if releases == nil {
+		releases = []domain.ReleaseSummary{}
+	}
+
+	writeJSON(w, http.StatusOK, releases)
+}
+
+// HandleCreateRelease handles POST /api/releases
+func (h *APIHandler) HandleCreateRelease(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		writeError(w, http.StatusMethodNotAllowed, "Method not allowed")
+		return
+	}
+
+	project, err := h.authenticate(r)
+	if err != nil {
+		writeError(w, http.StatusUnauthorized, "Unauthorized - "+err.Error())
+		return
+	}
+
+	if h.releaseRepo == nil {
+		writeError(w, http.StatusInternalServerError, "Release repository not configured")
+		return
+	}
+
+	var req domain.CreateReleaseRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		writeError(w, http.StatusBadRequest, "Bad Request - Invalid JSON")
+		return
+	}
+
+	req.Version = strings.TrimSpace(req.Version)
+	if req.Version == "" {
+		writeError(w, http.StatusBadRequest, "Bad Request - Version cannot be empty")
+		return
+	}
+
+	rel, err := h.releaseRepo.CreateRelease(r.Context(), project.ID, req.Version, req.Ref, req.Commit)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "Failed to create release: "+err.Error())
+		return
+	}
+
+	writeJSON(w, http.StatusCreated, rel)
+}
+
+// HandleReleaseIncidents handles GET /api/releases/{version}/incidents
+func (h *APIHandler) HandleReleaseIncidents(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		writeError(w, http.StatusMethodNotAllowed, "Method not allowed")
+		return
+	}
+
+	project, err := h.authenticate(r)
+	if err != nil {
+		writeError(w, http.StatusUnauthorized, "Unauthorized - "+err.Error())
+		return
+	}
+
+	if h.releaseRepo == nil {
+		writeError(w, http.StatusInternalServerError, "Release repository not configured")
+		return
+	}
+
+	version := getPathParam(r, "version")
+	if version == "" {
+		writeError(w, http.StatusBadRequest, "Release version required")
+		return
+	}
+
+	newOnly := r.URL.Query().Get("new_only") == "true" || r.URL.Query().Get("new_only") == "1"
+
+	incidents, err := h.releaseRepo.GetIncidentsByRelease(r.Context(), project.ID, version, newOnly)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "Failed to load release incidents: "+err.Error())
+		return
+	}
+
+	if incidents == nil {
+		incidents = []domain.Incident{}
+	}
+
+	writeJSON(w, http.StatusOK, incidents)
+}
+
+// =============================================================================
+// 4. ANALYTICS & STATS
+// =============================================================================
+
+// HandleStatsSummary handles GET /api/stats/summary
+func (h *APIHandler) HandleStatsSummary(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		writeError(w, http.StatusMethodNotAllowed, "Method not allowed")
+		return
+	}
+
+	project, err := h.authenticate(r)
+	if err != nil {
+		writeError(w, http.StatusUnauthorized, "Unauthorized - "+err.Error())
+		return
+	}
+
+	summary, err := h.incidentRepo.GetStatsSummary(r.Context(), project.ID)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "Failed to get stats: "+err.Error())
+		return
+	}
+
+	writeJSON(w, http.StatusOK, summary)
+}
+
+// =============================================================================
+// 5. REALTIME SSE & SYSTEM HEALTH
+// =============================================================================
+
+// HandleEventsStreamJSON handles GET /api/events/stream
+func (h *APIHandler) HandleEventsStreamJSON(w http.ResponseWriter, r *http.Request) {
+	flusher, ok := w.(http.Flusher)
+	if !ok {
+		writeError(w, http.StatusInternalServerError, "Streaming unsupported")
+		return
+	}
+
+	_, err := h.authenticate(r)
+	if err != nil {
+		writeError(w, http.StatusUnauthorized, "Unauthorized - "+err.Error())
+		return
+	}
+
+	if h.sseBroker == nil {
+		writeError(w, http.StatusInternalServerError, "SSE Broker not configured")
+		return
+	}
+
+	w.Header().Set("Content-Type", "text/event-stream")
+	w.Header().Set("Cache-Control", "no-cache")
+	w.Header().Set("Connection", "keep-alive")
+	w.Header().Set("Access-Control-Allow-Origin", "*")
+
+	clientChan := make(chan []byte, 20)
+	h.sseBroker.RegisterJSON(clientChan)
+	defer h.sseBroker.UnregisterJSON(clientChan)
+
+	fmt.Fprintf(w, ": connected\n\n")
+	flusher.Flush()
+
+	notify := r.Context().Done()
+	for {
+		select {
+		case <-notify:
 			return
+		case msg, ok := <-clientChan:
+			if !ok {
+				return
+			}
+			_, _ = w.Write(msg)
+			flusher.Flush()
 		}
-		w.Header().Set("Content-Type", "application/json")
-		w.Write([]byte(`{"status":"resolved","id":` + strconv.FormatInt(id, 10) + `}`))
-		return
-	} else if action == "reopen" {
-		if err := h.incidentRepo.ReopenIncident(r.Context(), id); err != nil {
-			http.Error(w, "Internal Server Error", http.StatusInternalServerError)
-			return
-		}
-		w.Header().Set("Content-Type", "application/json")
-		w.Write([]byte(`{"status":"unresolved","id":` + strconv.FormatInt(id, 10) + `}`))
-		return
+	}
+}
+
+// HandleHealthCheck handles GET /api/health
+func (h *APIHandler) HandleHealthCheck(w http.ResponseWriter, r *http.Request) {
+	uptime := time.Since(h.startTime).Truncate(time.Second).String()
+	queueSize := 0
+	if h.eventChan != nil {
+		queueSize = len(h.eventChan)
 	}
 
-	http.NotFound(w, r)
+	status := domain.HealthStatus{
+		Status:    "ok",
+		Database:  "healthy",
+		QueueSize: queueSize,
+		Uptime:    uptime,
+	}
+
+	writeJSON(w, http.StatusOK, status)
 }

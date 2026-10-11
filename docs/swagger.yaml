@@ -1,138 +1,937 @@
-basePath: /
-definitions:
-  main.EventPayload:
-    properties:
-      app_url:
-        type: string
-      exception_class:
-        type: string
-      file:
-        type: string
-      line:
-        type: integer
-      message:
-        type: string
-      request_method:
-        type: string
-      request_url:
-        type: string
-      stack_trace:
-        type: string
-    type: object
-  main.Incident:
-    properties:
-      appURL:
-        type: string
-      eventsCount:
-        type: integer
-      exceptionClass:
-        type: string
-      file:
-        type: string
-      firstSeenAt:
-        type: string
-      hash:
-        type: string
-      id:
-        format: int64
-        type: integer
-      lastSeenAt:
-        type: string
-      line:
-        type: integer
-      message:
-        type: string
-      projectID:
-        format: int64
-        type: integer
-      requestURL:
-        type: string
-      stackTrace:
-        type: string
-    type: object
-host: localhost:8080
+swagger: '2.0'
 info:
-  contact: {}
-  description: API documentation for LaraSentry Go Server.
   title: LaraSentry API
-  version: "1.0"
+  description: Официальная спецификация REST API микросервиса LaraSentry на русском
+    языке. Включает прием событий ошибок от Laravel, управление жизненным циклом инцидентов,
+    трекинг версий и деплоев из CI/CD, аналитику и мониторинг в реальном времени.
+  version: '2.0'
+host: localhost:8080
+basePath: /
+schemes:
+- http
+securityDefinitions:
+  Bearer:
+    type: apiKey
+    name: Authorization
+    in: header
+    description: 'Авторизационный токен проекта (API ключ). Передается в формате:
+      Bearer <API_KEY>'
 paths:
   /api/events:
     post:
+      tags:
+      - Events (Прием событий)
+      summary: Отправить событие ошибки (Event Ingestion)
+      description: 'Принимает и валидирует входящий payload исключения из Laravel-приложения
+        (через larasentry-client). Обработка происходит асинхронно: запрос ставится
+        в неблокирующую очередь в памяти (channel), вычисляется уникальный MD5-хеш
+        ошибки и клиенту возвращается статус 202 Accepted. Если ошибка повторяется,
+        инцидент дедуплицируется и счетчик увеличивается.'
       consumes:
       - application/json
-      description: Receives an exception/error payload from a Laravel application.
-      parameters:
-      - description: Event Payload
-        in: body
-        name: payload
-        required: true
-        schema:
-          $ref: '#/definitions/main.EventPayload'
       produces:
       - application/json
-      responses:
-        "202":
-          description: Accepted
-          schema:
-            additionalProperties:
-              type: string
-            type: object
-        "400":
-          description: Bad Request
-          schema:
-            type: string
-        "401":
-          description: Unauthorized
-          schema:
-            type: string
-        "403":
-          description: Forbidden
-          schema:
-            type: string
-        "405":
-          description: Method Not Allowed
-          schema:
-            type: string
       security:
       - Bearer: []
-      summary: Send a new error event
+      parameters:
+      - name: payload
+        in: body
+        required: true
+        description: JSON-пейлоад с детальной информацией об исключении из Laravel
+        schema:
+          $ref: '#/definitions/domain.EventPayload'
+      responses:
+        '202':
+          description: Событие успешно принято в очередь обработки. Возвращает сгенерированный
+            UUID события и MD5-хеш инцидента.
+          schema:
+            type: object
+            properties:
+              status:
+                type: string
+                example: accepted
+                description: Статус постановки в очередь
+              event_id:
+                type: string
+                example: 9b1deb4d-3b7d-4bad-9bdd-2b0d7b3dcb6d
+                description: Уникальный UUID принятого события
+              hash:
+                type: string
+                example: e99a18c428cb38d5f260853678922e03
+                description: MD5-хеш инцидента для группировки
+        '400':
+          description: Некорректный запрос (невалидный JSON или отсутствуют обязательные
+            поля exception_class/message)
+        '401':
+          description: 'Ошибка авторизации: не указан или недействителен Bearer API
+            Key'
+        '403':
+          description: 'Доступ запрещен: IP-адрес клиента не входит в список разрешенных
+            ALLOWED_IPS'
+  /api/events/batch:
+    post:
       tags:
-      - events
+      - Events (Прием событий)
+      summary: Пакетная отправка событий ошибок (Batch Ingestion)
+      description: Позволяет отправить массив ошибок (до 50 событий) за один HTTP-запрос.
+        Используется для периодического сброса локального буфера очередей в Laravel
+        или снижения сетевых накладных расходов при пиковых нагрузках.
+      consumes:
+      - application/json
+      produces:
+      - application/json
+      security:
+      - Bearer: []
+      parameters:
+      - name: body
+        in: body
+        required: true
+        description: Объект, содержащий массив событий
+        schema:
+          type: object
+          required:
+          - events
+          properties:
+            events:
+              type: array
+              description: Список событий ошибок (не более 50 за один запрос)
+              items:
+                $ref: '#/definitions/domain.EventPayload'
+      responses:
+        '202':
+          description: Пачка событий принята в очередь обработки
+          schema:
+            type: object
+            properties:
+              status:
+                type: string
+                example: accepted
+                description: Статус операции
+              accepted_count:
+                type: integer
+                example: 15
+                description: Количество принятых событий
+        '400':
+          description: Невалидный JSON, пустой список или превышен лимит в 50 событий
+        '401':
+          description: Ошибка авторизации
   /api/incidents:
     get:
-      description: Returns the latest 100 grouped incidents for the authenticated
-        project.
+      tags:
+      - Incidents (Инциденты)
+      summary: Список инцидентов с фильтрацией и пагинацией
+      description: Возвращает постраничный список сгруппированных инцидентов проекта.
+        Поддерживает фильтрацию по статусу (unresolved, resolved, ignored, all), окружению,
+        версии релиза, поисковой строке, только регрессиям, а также сортировку и пагинацию
+        с метаданными.
+      produces:
+      - application/json
+      security:
+      - Bearer: []
+      parameters:
+      - name: status
+        in: query
+        type: string
+        enum:
+        - unresolved
+        - resolved
+        - ignored
+        - all
+        default: unresolved
+        description: 'Статус инцидента: unresolved (нерешенные, по умолчанию), resolved
+          (закрытые), ignored (заглушенные), all (все)'
+      - name: q
+        in: query
+        type: string
+        description: Поисковый запрос для фильтрации по сообщению, имени класса, файлу
+          или URL
+      - name: environment
+        in: query
+        type: string
+        description: Окружение исполнения (напр. production, staging, local)
+      - name: release
+        in: query
+        type: string
+        description: Версия релиза (first_release или last_release)
+      - name: is_regression
+        in: query
+        type: boolean
+        description: 'Флаг регрессии: true — показать только ошибки, вернувшиеся после
+          закрытия'
+      - name: sort
+        in: query
+        type: string
+        enum:
+        - recent
+        - count
+        - first_seen
+        default: recent
+        description: 'Сортировка: recent (свежие), count (по частоте повторов), first_seen
+          (хронологически)'
+      - name: page
+        in: query
+        type: integer
+        default: 1
+        description: Номер страницы для пагинации (начиная с 1)
+      - name: limit
+        in: query
+        type: integer
+        default: 50
+        description: Количество записей на странице (от 1 до 200)
+      - name: include_trace
+        in: query
+        type: boolean
+        default: false
+        description: Включать ли полный стектрейс в каждый элемент списка (по умолчанию
+          false для экономии трафика)
+      responses:
+        '200':
+          description: Успешный возврат списка инцидентов с объектом пагинации meta
+          schema:
+            $ref: '#/definitions/domain.IncidentListResponse'
+        '401':
+          description: 'Ошибка авторизации: недействительный API-ключ'
+        '500':
+          description: Внутренняя ошибка сервера базы данных
+  /api/incidents/{id}:
+    get:
+      tags:
+      - Incidents (Инциденты)
+      summary: Детальная карточка инцидента
+      description: 'Возвращает полные данные об инциденте: полный стектрейс ошибки,
+        очищенный стектрейс приложения (без сторонних библиотек vendor/laravel/symfony),
+        статистику фреймов кода и историю первого/последнего появления.'
+      produces:
+      - application/json
+      security:
+      - Bearer: []
+      parameters:
+      - name: id
+        in: path
+        required: true
+        type: integer
+        format: int64
+        description: Числовой идентификатор инцидента в базе данных
+      responses:
+        '200':
+          description: Полная информация об инциденте со стектрейсами
+          schema:
+            $ref: '#/definitions/domain.IncidentDetail'
+        '401':
+          description: Неавторизованный запрос
+        '403':
+          description: Инцидент принадлежит другому проекту
+        '404':
+          description: Инцидент с указанным ID не найден
+    delete:
+      tags:
+      - Incidents (Инциденты)
+      summary: Удалить инцидент
+      description: Безвозвратно удаляет запись об инциденте из базы данных. Полезно
+        для очистки ошибочных логов или тестовых сбоев.
+      security:
+      - Bearer: []
+      parameters:
+      - name: id
+        in: path
+        required: true
+        type: integer
+        format: int64
+        description: Идентификатор удаляемого инцидента
+      responses:
+        '204':
+          description: Инцидент успешно удален (тело ответа пустое)
+        '401':
+          description: Ошибка авторизации
+        '404':
+          description: Инцидент не найден
+  /api/incidents/{id}/resolve:
+    post:
+      tags:
+      - Incidents Lifecycle (Жизненный цикл)
+      summary: Закрыть (резолвить) инцидент
+      description: 'Помечает инцидент как решенный со стратегией отслеживания повторений:
+
+        • immediate — закрыть немедленно (при любом новом появлении инцидент переоткроется);
+
+        • next — исправлен в следующем релизе (новые события из текущего релиза будут
+        глушиться);
+
+        • current — исправлен в текущем активном релизе проекта;
+
+        • version — исправлен в конкретной версии (напр. 1.4.3). События из более
+        старых версий игнорируются, а в версии >= указанной — фиксируется регрессия.'
+      consumes:
+      - application/json
+      produces:
+      - application/json
+      security:
+      - Bearer: []
+      parameters:
+      - name: id
+        in: path
+        required: true
+        type: integer
+        format: int64
+        description: Идентификатор инцидента
+      - name: body
+        in: body
+        required: false
+        description: Параметры резолва ошибки
+        schema:
+          $ref: '#/definitions/domain.ResolveRequest'
+      responses:
+        '200':
+          description: Инцидент успешно закрыт. Возвращает обновленные данные инцидента.
+          schema:
+            $ref: '#/definitions/domain.Incident'
+        '401':
+          description: Ошибка авторизации
+        '404':
+          description: Инцидент не найден
+  /api/incidents/{id}/reopen:
+    post:
+      tags:
+      - Incidents Lifecycle (Жизненный цикл)
+      summary: Переоткрыть инцидент
+      description: Переводит ранее закрытый или заглушенный инцидент обратно в активный
+        статус 'unresolved', сбрасывая статус резолва и флаг регрессии.
+      produces:
+      - application/json
+      security:
+      - Bearer: []
+      parameters:
+      - name: id
+        in: path
+        required: true
+        type: integer
+        format: int64
+        description: Идентификатор инцидента
+      responses:
+        '200':
+          description: Инцидент успешно переоткрыт
+          schema:
+            $ref: '#/definitions/domain.Incident'
+        '401':
+          description: Ошибка авторизации
+        '404':
+          description: Инцидент не найден
+  /api/incidents/{id}/ignore:
+    post:
+      tags:
+      - Incidents Lifecycle (Жизненный цикл)
+      summary: Заглушить / Игнорировать инцидент
+      description: Переводит инцидент в статус 'ignored'. События продолжат агрегироваться
+        и подсчитываться в базе, но уведомления в Telegram отправляться не будут.
+      consumes:
+      - application/json
+      produces:
+      - application/json
+      security:
+      - Bearer: []
+      parameters:
+      - name: id
+        in: path
+        required: true
+        type: integer
+        format: int64
+        description: Идентификатор инцидента
+      - name: body
+        in: body
+        required: false
+        description: Флаг игнорирования
+        schema:
+          type: object
+          properties:
+            ignored:
+              type: boolean
+              default: true
+              description: true — заглушить, false — вернуть в нерешенные
+      responses:
+        '200':
+          description: Статус игнорирования обновлен
+          schema:
+            $ref: '#/definitions/domain.Incident'
+        '401':
+          description: Ошибка авторизации
+        '404':
+          description: Инцидент не найден
+  /api/incidents/batch:
+    post:
+      tags:
+      - Incidents Lifecycle (Жизненный цикл)
+      summary: Пакетные действия над несколькими инцидентами
+      description: 'Выполняет групповое действие в рамках единой транзакции для массива
+        ID: закрыть (resolve), переоткрыть (reopen), заглушить (ignore) или удалить
+        (delete).'
+      consumes:
+      - application/json
+      produces:
+      - application/json
+      security:
+      - Bearer: []
+      parameters:
+      - name: body
+        in: body
+        required: true
+        description: Параметры пакетной операции
+        schema:
+          $ref: '#/definitions/domain.BatchIncidentsRequest'
+      responses:
+        '200':
+          description: Операция успешно выполнена
+          schema:
+            type: object
+            properties:
+              action:
+                type: string
+                example: resolve
+                description: Выполненное действие
+              affected:
+                type: integer
+                example: 3
+                description: Количество обновленных записей
+        '400':
+          description: Некорректный запрос или пустой массив ID
+        '401':
+          description: Ошибка авторизации
+  /api/releases:
+    get:
+      tags:
+      - Releases (Релизы и Деплои)
+      summary: Список релизов проекта
+      description: 'Возвращает историю версий и деплоев приложения с агрегированной
+        статистикой по каждой версии: общее число ошибок, количество новых багов и
+        регрессий.'
+      produces:
+      - application/json
+      security:
+      - Bearer: []
+      parameters:
+      - name: limit
+        in: query
+        type: integer
+        default: 20
+        description: Максимальное количество возвращаемых релизов
+      responses:
+        '200':
+          description: Список версий с метриками стабильности
+          schema:
+            type: array
+            items:
+              $ref: '#/definitions/domain.ReleaseSummary'
+        '401':
+          description: Ошибка авторизации
+    post:
+      tags:
+      - Releases (Релизы и Деплои)
+      summary: Зарегистрировать новый релиз (CI/CD деплой-хук)
+      description: Используется в пайплайнах CI/CD (GitHub Actions, GitLab CI, Bitbucket)
+        для оповещения сервера о выкатке новой версии приложения. Фиксирует версию,
+        ветку и коммит.
+      consumes:
+      - application/json
+      produces:
+      - application/json
+      security:
+      - Bearer: []
+      parameters:
+      - name: body
+        in: body
+        required: true
+        description: Данные о выкатываемом релизе
+        schema:
+          $ref: '#/definitions/domain.CreateReleaseRequest'
+      responses:
+        '201':
+          description: Релиз успешно создан и зарегистрирован
+          schema:
+            $ref: '#/definitions/domain.Release'
+        '400':
+          description: Не указан обязательный номер версии
+        '401':
+          description: Ошибка авторизации
+  /api/releases/{version}/incidents:
+    get:
+      tags:
+      - Releases (Релизы и Деплои)
+      summary: Список инцидентов конкретной версии
+      description: Возвращает ошибки, зафиксированные в указанной версии релиза. Позволяет
+        мгновенно оценить качество и стабильность свежего релиза.
+      produces:
+      - application/json
+      security:
+      - Bearer: []
+      parameters:
+      - name: version
+        in: path
+        required: true
+        type: string
+        description: Семантический номер версии (напр. 1.4.3)
+      - name: new_only
+        in: query
+        type: boolean
+        default: false
+        description: Показывать только те ошибки, которые впервые появились именно
+          в этой версии
+      responses:
+        '200':
+          description: Список ошибок релиза
+          schema:
+            type: array
+            items:
+              $ref: '#/definitions/domain.Incident'
+        '401':
+          description: Ошибка авторизации
+  /api/stats/summary:
+    get:
+      tags:
+      - Analytics (Аналитика и Метрики)
+      summary: Сводная аналитика и счетчики проекта
+      description: 'Возвращает ключевые показатели для дашбордов и мониторинга: общее
+        количество инцидентов, нерешенные, решенные, заглушенные, число регрессий
+        и объем событий за последние 24 часа.'
+      produces:
+      - application/json
+      security:
+      - Bearer: []
+      responses:
+        '200':
+          description: Сводные счетчики проекта
+          schema:
+            $ref: '#/definitions/domain.StatsSummary'
+        '401':
+          description: Ошибка авторизации
+  /api/events/stream:
+    get:
+      tags:
+      - Realtime (Потоковая передача)
+      summary: Поток событий в реальном времени (Server-Sent Events)
+      description: Постоянное соединение Server-Sent Events (SSE), передающее события
+        новых ошибок (incident_new), регрессий (regression) и обновления счетчиков
+        в формате JSON. Подходит для внешних утилит, ботов и кастомных дашбордов.
+      produces:
+      - text/event-stream
+      security:
+      - Bearer: []
+      parameters:
+      - name: token
+        in: query
+        type: string
+        description: API-ключ проекта (query-параметр для поддержки браузерного EventSource)
+      responses:
+        '200':
+          description: Поток Server-Sent Events успешно установлен
+          schema:
+            type: string
+        '401':
+          description: Ошибка авторизации
+  /api/health:
+    get:
+      tags:
+      - System (Система)
+      summary: Проверка работоспособности сервиса (Health Check)
+      description: Liveness/Readiness проба для Docker и Kubernetes. Возвращает статус
+        сервиса, доступность базы SQLite, текущий размер очереди в памяти и время
+        непрерывной работы (uptime).
       produces:
       - application/json
       responses:
-        "200":
-          description: OK
+        '200':
+          description: Сервис полностью исправен и готов принимать запросы
           schema:
-            items:
-              $ref: '#/definitions/main.Incident'
-            type: array
-        "401":
-          description: Unauthorized
-          schema:
-            type: string
-        "405":
-          description: Method Not Allowed
-          schema:
-            type: string
-        "500":
-          description: Internal Server Error
-          schema:
-            type: string
-      security:
-      - Bearer: []
-      summary: List incidents
+            $ref: '#/definitions/domain.HealthStatus'
+definitions:
+  domain.UserContext:
+    type: object
+    description: Данные об авторизованном пользователе на момент сбоя
+    properties:
+      id:
+        type: string
+        example: '1054'
+        description: ID пользователя в вашей системе
+      email:
+        type: string
+        example: user@example.com
+        description: Email пользователя
+      ip_address:
+        type: string
+        example: 198.51.100.42
+        description: IP-адрес пользователя
+  domain.EventPayload:
+    type: object
+    required:
+    - exception_class
+    - message
+    description: JSON-структура данных об ошибке
+    properties:
+      release:
+        type: string
+        example: 1.4.2
+        description: Версия релиза приложения (из config/app.php или .env)
+      environment:
+        type: string
+        example: production
+        description: Окружение (production, staging, local и т.д.)
+      exception_class:
+        type: string
+        example: Illuminate\Database\QueryException
+        description: Полное имя класса исключения в PHP
+      message:
+        type: string
+        example: SQLSTATE[HY000] Connection refused
+        description: Текст сообщения об ошибке
+      file:
+        type: string
+        example: /app/Http/Controllers/OrderController.php
+        description: Файл, в котором возникла ошибка
+      line:
+        type: integer
+        example: 87
+        description: Номер строки в файле
+      stack_trace:
+        type: string
+        description: Полный стектрейс ошибки
+      app_url:
+        type: string
+        example: https://example.com
+        description: Базовый URL приложения (APP_URL)
+      request_url:
+        type: string
+        example: https://example.com/api/orders
+        description: Конкретный URL HTTP-запроса
+      request_method:
+        type: string
+        example: POST
+        description: HTTP-метод (GET, POST и т.д.)
+      level:
+        type: string
+        enum:
+        - critical
+        - error
+        - warning
+        - info
+        example: error
+        description: Уровень критичности ошибки
+      user:
+        $ref: '#/definitions/domain.UserContext'
       tags:
-      - incidents
-securityDefinitions:
-  Bearer:
-    description: Type "Bearer" followed by a space and API key.
-    in: header
-    name: Authorization
-    type: apiKey
-swagger: "2.0"
+        type: object
+        additionalProperties:
+          type: string
+        description: Произвольные строковые теги (напр. queue, job_name)
+      fingerprint:
+        type: array
+        items:
+          type: string
+        description: Кастомный массив строк для вычисления хеша группировки
+  domain.Incident:
+    type: object
+    description: Сгруппированный инцидент
+    properties:
+      id:
+        type: integer
+        format: int64
+        example: 42
+        description: Уникальный ID инцидента
+      project_id:
+        type: integer
+        format: int64
+        example: 1
+        description: ID проекта
+      project_name:
+        type: string
+        example: Default Project
+        description: Название проекта
+      hash:
+        type: string
+        example: e99a18c428cb38d5f260853678922e03
+        description: MD5-хеш группировки
+      exception_class:
+        type: string
+        example: RuntimeException
+        description: Класс исключения
+      message:
+        type: string
+        example: Connection timed out
+        description: Сообщение об ошибке
+      file:
+        type: string
+        example: /app/Services/DB.php
+        description: Файл возникновения ошибки
+      line:
+        type: integer
+        example: 102
+        description: Строка ошибки
+      stack_trace:
+        type: string
+        description: Полный стектрейс
+      app_url:
+        type: string
+        example: https://example.com
+        description: Базовый URL приложения
+      request_url:
+        type: string
+        example: https://example.com/api/data
+        description: URL запроса
+      events_count:
+        type: integer
+        example: 14
+        description: Общее количество повторений ошибки
+      first_seen_at:
+        type: string
+        format: date-time
+        description: Дата и время первого появления
+      last_seen_at:
+        type: string
+        format: date-time
+        description: Дата и время последнего появления
+      environment:
+        type: string
+        example: production
+        description: Окружение исполнения
+      first_release:
+        type: string
+        example: 1.0.0
+        description: Версия, в которой ошибка появилась впервые
+      last_release:
+        type: string
+        example: 1.0.2
+        description: Версия, в которой ошибка зафиксирована в последний раз
+      status:
+        type: string
+        enum:
+        - unresolved
+        - resolved
+        - ignored
+        example: unresolved
+        description: 'Текущий статус: unresolved, resolved, ignored'
+      resolved_in_release:
+        type: string
+        example: 1.0.1
+        description: Релиз, в котором инцидент был закрыт
+      resolved_at:
+        type: string
+        format: date-time
+        description: Дата и время закрытия инцидента
+      is_regression:
+        type: boolean
+        example: false
+        description: Флаг регрессии (ошибка вернулась после резолва)
+  domain.IncidentDetail:
+    type: object
+    description: Детальная карточка инцидента с обработанным стектрейсом
+    allOf:
+    - $ref: '#/definitions/domain.Incident'
+    - type: object
+      properties:
+        app_stack_trace:
+          type: string
+          description: Очищенный стектрейс приложения (без сторонних vendor фреймов)
+        stack_trace_stats:
+          type: object
+          description: Статистика фреймов
+          properties:
+            total_frames:
+              type: integer
+              example: 24
+              description: Общее количество фреймов в стектрейсе
+            app_frames:
+              type: integer
+              example: 3
+              description: Количество фреймов собственного кода приложения
+  domain.PageMeta:
+    type: object
+    description: Метаданные пагинации
+    properties:
+      total:
+        type: integer
+        example: 125
+        description: Всего записей по заданному фильтру
+      page:
+        type: integer
+        example: 1
+        description: Текущая страница
+      limit:
+        type: integer
+        example: 50
+        description: Количество элементов на странице
+      total_pages:
+        type: integer
+        example: 3
+        description: Всего страниц
+  domain.IncidentListResponse:
+    type: object
+    description: Постраничный ответ со списком инцидентов
+    properties:
+      items:
+        type: array
+        description: Список инцидентов текущей страницы
+        items:
+          $ref: '#/definitions/domain.Incident'
+      meta:
+        $ref: '#/definitions/domain.PageMeta'
+  domain.ResolveRequest:
+    type: object
+    description: Параметры закрытия ошибки
+    properties:
+      type:
+        type: string
+        enum:
+        - immediate
+        - next
+        - current
+        - version
+        default: immediate
+        description: 'Стратегия резолва: immediate, next, current, version'
+      version:
+        type: string
+        example: 1.4.3
+        description: Целевая версия приложения (обязательна, если type=version)
+  domain.BatchIncidentsRequest:
+    type: object
+    required:
+    - action
+    - ids
+    description: Параметры групповой операции над инцидентами
+    properties:
+      action:
+        type: string
+        enum:
+        - resolve
+        - reopen
+        - ignore
+        - delete
+        example: resolve
+        description: Тип операции
+      ids:
+        type: array
+        items:
+          type: integer
+          format: int64
+        example:
+        - 1
+        - 2
+        - 3
+        description: Список числовых ID инцидентов
+      params:
+        $ref: '#/definitions/domain.ResolveRequest'
+  domain.Release:
+    type: object
+    description: Информация о релизе
+    properties:
+      id:
+        type: integer
+        format: int64
+        example: 1
+        description: ID релиза
+      project_id:
+        type: integer
+        format: int64
+        example: 1
+        description: ID проекта
+      version:
+        type: string
+        example: 1.4.2
+        description: Версия приложения
+      ref:
+        type: string
+        example: refs/heads/main
+        description: Git-ветка или тег
+      commit:
+        type: string
+        example: abcdef123456
+        description: SHA коммита
+      created_at:
+        type: string
+        format: date-time
+        description: Дата и время регистрации деплоя
+  domain.CreateReleaseRequest:
+    type: object
+    required:
+    - version
+    description: Параметры регистрации деплоя из CI/CD
+    properties:
+      version:
+        type: string
+        example: 1.4.3
+        description: Версия приложения (обязательное поле)
+      ref:
+        type: string
+        example: refs/heads/main
+        description: Git-ветка или тег
+      commit:
+        type: string
+        example: abcdef123456
+        description: SHA-хеш коммита
+  domain.ReleaseSummary:
+    type: object
+    description: Сводная информация о релизе со статистикой инцидентов
+    allOf:
+    - $ref: '#/definitions/domain.Release'
+    - type: object
+      properties:
+        total_incidents:
+          type: integer
+          example: 18
+          description: Общее число ошибок в данном релизе
+        new_incidents:
+          type: integer
+          example: 3
+          description: Ошибки, впервые возникшие в этом релизе
+        regressions_count:
+          type: integer
+          example: 1
+          description: Количество вернувшихся регрессий
+  domain.StatsSummary:
+    type: object
+    description: Сводная статистика проекта
+    properties:
+      total_incidents:
+        type: integer
+        example: 142
+        description: Всего инцидентов в проекте
+      unresolved:
+        type: integer
+        example: 14
+        description: Открытых нерешенных инцидентов
+      resolved:
+        type: integer
+        example: 121
+        description: Закрытых инцидентов
+      ignored:
+        type: integer
+        example: 7
+        description: Заглушенных инцидентов
+      regressions:
+        type: integer
+        example: 2
+        description: Активных регрессий
+      events_last_24h:
+        type: integer
+        example: 3850
+        description: Количество событий ошибок за последние 24 часа
+      active_releases_count:
+        type: integer
+        example: 4
+        description: Количество зарегистрированных версий
+  domain.HealthStatus:
+    type: object
+    description: Диагностический статус системы
+    properties:
+      status:
+        type: string
+        example: ok
+        description: 'Статус приложения: ok, degraded, error'
+      database:
+        type: string
+        example: healthy
+        description: Состояние базы SQLite
+      queue_size:
+        type: integer
+        example: 5
+        description: Текущий размер очереди обработки в памяти
+      uptime:
+        type: string
+        example: 48h22m15s
+        description: Время непрерывной работы процесса

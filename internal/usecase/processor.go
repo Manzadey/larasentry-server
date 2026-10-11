@@ -7,8 +7,21 @@ import (
 	"fmt"
 	"log"
 	"server/internal/domain"
+	"strings"
 	"sync"
 )
+
+// CalculateHash computes MD5 hash from event payload and project key
+func CalculateHash(projectKey string, payload domain.EventPayload) string {
+	var hashInput string
+	if len(payload.Fingerprint) > 0 {
+		hashInput = fmt.Sprintf("%s:%s", projectKey, strings.Join(payload.Fingerprint, ":"))
+	} else {
+		hashInput = fmt.Sprintf("%s:%s:%s:%d", projectKey, payload.ExceptionClass, payload.File, payload.Line)
+	}
+	hashBytes := md5.Sum([]byte(hashInput))
+	return hex.EncodeToString(hashBytes[:])
+}
 
 type Processor struct {
 	repo        domain.IncidentRepository
@@ -16,6 +29,7 @@ type Processor struct {
 	alertBuffer map[string]*domain.Incident
 	mu          sync.Mutex
 	onIncident  func(inc domain.Incident)
+	onJSONEvent func(eventType string, data any)
 }
 
 func NewProcessor(repo domain.IncidentRepository, eventChan chan domain.IncomingEvent) *Processor {
@@ -32,6 +46,12 @@ func (p *Processor) SetOnIncident(fn func(inc domain.Incident)) {
 	p.onIncident = fn
 }
 
+func (p *Processor) SetOnJSONEvent(fn func(eventType string, data any)) {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	p.onJSONEvent = fn
+}
+
 func (p *Processor) Start() {
 	log.Println("Starting Background Processor...")
 	for event := range p.eventChan {
@@ -41,9 +61,7 @@ func (p *Processor) Start() {
 
 func (p *Processor) processEvent(ctx context.Context, event domain.IncomingEvent) {
 	// 1. Calculate hash
-	hashInput := fmt.Sprintf("%s:%s:%s:%d", event.ProjectKey, event.Payload.ExceptionClass, event.Payload.File, event.Payload.Line)
-	hashBytes := md5.Sum([]byte(hashInput))
-	hash := hex.EncodeToString(hashBytes[:])
+	hash := CalculateHash(event.ProjectKey, event.Payload)
 
 	// 2. UPSERT in Database
 	res, err := p.repo.UpsertIncident(ctx, event, hash)
@@ -71,10 +89,21 @@ func (p *Processor) processEvent(ctx context.Context, event domain.IncomingEvent
 	// 4. SSE Realtime Broadcast
 	p.mu.Lock()
 	callback := p.onIncident
+	jsonCallback := p.onJSONEvent
 	p.mu.Unlock()
 
 	if callback != nil && !res.Ignored {
 		go callback(res.Incident)
+	}
+
+	if jsonCallback != nil && !res.Ignored {
+		eventType := "incident_updated"
+		if res.IsNew {
+			eventType = "incident_new"
+		} else if res.IsRegression {
+			eventType = "regression"
+		}
+		go jsonCallback(eventType, res.Incident)
 	}
 }
 
@@ -90,3 +119,4 @@ func (p *Processor) GetAndClearBuffer() map[string]*domain.Incident {
 	p.alertBuffer = make(map[string]*domain.Incident)
 	return current
 }
+

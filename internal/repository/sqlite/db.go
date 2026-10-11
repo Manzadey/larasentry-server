@@ -78,7 +78,10 @@ func InitDB(dbPath string) (*sql.DB, error) {
 
 	// 1. Idempotent migration for existing tables that may miss the new columns
 	if err := migrateIncidentsColumns(db); err != nil {
-		return nil, fmt.Errorf("migration failed: %w", err)
+		return nil, fmt.Errorf("incident migration failed: %w", err)
+	}
+	if err := migrateReleasesColumns(db); err != nil {
+		return nil, fmt.Errorf("release migration failed: %w", err)
 	}
 
 	// 2. Create indexes ONLY AFTER columns are guaranteed to exist
@@ -144,3 +147,44 @@ func migrateIncidentsColumns(db *sql.DB) error {
 
 	return nil
 }
+
+func migrateReleasesColumns(db *sql.DB) error {
+	rows, err := db.Query("PRAGMA table_info(releases);")
+	if err != nil {
+		return err
+	}
+	defer rows.Close()
+
+	existing := make(map[string]bool)
+	for rows.Next() {
+		var cid int
+		var name, colType string
+		var notNull, pk int
+		var dfltValue sql.NullString
+		if err := rows.Scan(&cid, &name, &colType, &notNull, &dfltValue, &pk); err != nil {
+			return err
+		}
+		existing[name] = true
+	}
+
+	columnsToAdd := []struct {
+		name string
+		def  string
+	}{
+		{"ref", "TEXT"},
+		{"commit_sha", "TEXT"},
+	}
+
+	for _, col := range columnsToAdd {
+		if !existing[col.name] {
+			stmt := fmt.Sprintf("ALTER TABLE releases ADD COLUMN %s %s;", col.name, col.def)
+			if _, err := db.Exec(stmt); err != nil {
+				return fmt.Errorf("failed adding column %s: %w", col.name, err)
+			}
+			log.Printf("[DB] Added column %s to releases", col.name)
+		}
+	}
+
+	return nil
+}
+
