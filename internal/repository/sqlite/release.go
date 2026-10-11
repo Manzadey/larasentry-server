@@ -145,7 +145,8 @@ func (r *ReleaseRepo) GetIncidentsByRelease(ctx context.Context, projectID int64
 			i.hash, i.exception_class, i.message, i.file, i.line, i.app_url, i.request_url, 
 			i.events_count, i.first_seen_at, i.last_seen_at,
 			i.environment, COALESCE(i.first_release, ''), COALESCE(i.last_release, ''),
-			i.status, COALESCE(i.resolved_in_release, ''), i.resolved_at, i.is_regression
+			i.status, COALESCE(i.resolved_in_release, ''), i.resolved_at, i.is_regression,
+			COALESCE(i.php_version, '')
 		FROM incidents i
 		LEFT JOIN projects p ON i.project_id = p.id
 		WHERE i.project_id = ?
@@ -179,6 +180,7 @@ func (r *ReleaseRepo) GetIncidentsByRelease(ctx context.Context, projectID int64
 			&inc.EventsCount, &inc.FirstSeenAt, &inc.LastSeenAt,
 			&inc.Environment, &inc.FirstRelease, &inc.LastRelease,
 			&inc.Status, &inc.ResolvedInRelease, &resolvedAt, &isRegrInt,
+			&inc.PHPVersion,
 		); err != nil {
 			continue
 		}

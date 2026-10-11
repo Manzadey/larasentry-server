@@ -15,6 +15,7 @@ import (
 	deliveryHttp "server/internal/delivery/http"
 	"server/internal/delivery/sse"
 	"server/internal/delivery/telegram"
+	"server/internal/pkg/github"
 	"server/internal/repository/sqlite"
 	"server/internal/usecase"
 )
@@ -86,6 +87,10 @@ func main() {
 		log.Fatalf("Failed to initialize UI handler: %v", err)
 	}
 
+	// Setup GitHub API client
+	githubClient := github.NewClient(nil, "", 15*time.Minute)
+	uiHandler.SetGitHubClient(githubClient)
+
 	processor.SetOnIncident(func(inc domain.Incident) {
 		sseBroker.BroadcastIncident(inc, uiHandler.GetRowTemplate())
 	})
@@ -124,12 +129,16 @@ func main() {
 	mux.HandleFunc("POST /api/incidents/{id}/reopen", apiHandler.HandleReopenIncident)
 	mux.HandleFunc("POST /api/incidents/{id}/ignore", apiHandler.HandleIgnoreIncident)
 
-	// 3. Releases routes
+	// 3. Projects routes
+	mux.HandleFunc("PUT /api/projects/{id}/github", apiHandler.HandleUpdateProjectGitHub)
+	mux.HandleFunc("POST /api/projects/{id}/github", apiHandler.HandleUpdateProjectGitHub)
+
+	// 4. Releases routes
 	mux.HandleFunc("GET /api/releases", apiHandler.HandleListReleases)
 	mux.HandleFunc("POST /api/releases", apiHandler.HandleCreateRelease)
 	mux.HandleFunc("GET /api/releases/{version}/incidents", apiHandler.HandleReleaseIncidents)
 
-	// 4. Analytics & System
+	// 5. Analytics & System
 	mux.HandleFunc("GET /api/stats/summary", apiHandler.HandleStatsSummary)
 	mux.HandleFunc("GET /api/events/stream", apiHandler.HandleEventsStreamJSON)
 	mux.HandleFunc("GET /api/health", apiHandler.HandleHealthCheck)
@@ -142,6 +151,7 @@ func main() {
 	mux.HandleFunc("/ui", uiHandler.HandleIndex)
 	mux.HandleFunc("/ui/incidents", uiHandler.HandleIncidents)
 	mux.HandleFunc("/ui/incidents/", uiHandler.HandleIncidentDetail)
+	mux.HandleFunc("POST /ui/projects/github-settings", uiHandler.HandleUpdateProjectGitHubSettings)
 	mux.HandleFunc("/ui/events/stream", uiHandler.HandleEventsStream)
 
 	// Root redirect

@@ -122,3 +122,132 @@ func TestIncidentLifecycleAndRegression(t *testing.T) {
 		t.Errorf("expected unresolved status after reopen, got: %+v", inc)
 	}
 }
+
+func TestIncident_CodeSnippetPersistence(t *testing.T) {
+	incRepo, _, cleanup := setupTestDB(t)
+	defer cleanup()
+
+	ctx := context.Background()
+
+	snippet := &domain.CodeSnippet{
+		File: "app/Http/Controllers/OrderController.php",
+		Line: 42,
+		Lines: []domain.CodeLine{
+			{Number: 41, Code: "    $cart = $this->cartService->get();", IsError: false},
+			{Number: 42, Code: "    $total = $cart->items->sum('price');", IsError: true},
+			{Number: 43, Code: "    return response()->json(['total' => $total]);", IsError: false},
+		},
+		Source: "client",
+	}
+
+	evt := domain.IncomingEvent{
+		ProjectID:   1,
+		ProjectName: "Default Project",
+		ProjectKey:  "test-api-key",
+		Payload: domain.EventPayload{
+			ExceptionClass: "Error",
+			Message:        "Call to a member function sum() on null",
+			File:           "/var/www/html/app/Http/Controllers/OrderController.php",
+			Line:           42,
+			CodeSnippet:    snippet,
+		},
+	}
+	hash := "snippethash123"
+
+	res, err := incRepo.UpsertIncident(ctx, evt, hash)
+	if err != nil {
+		t.Fatalf("UpsertIncident failed: %v", err)
+	}
+
+	inc, err := incRepo.GetIncidentByID(ctx, res.IncidentID)
+	if err != nil {
+		t.Fatalf("GetIncidentByID failed: %v", err)
+	}
+	if inc.CodeSnippet == nil {
+		t.Fatalf("expected CodeSnippet to be persisted, but got nil")
+	}
+	if inc.CodeSnippet.Line != 42 || len(inc.CodeSnippet.Lines) != 3 {
+		t.Errorf("unexpected CodeSnippet content: %+v", inc.CodeSnippet)
+	}
+	if inc.CodeSnippet.Lines[1].IsError != true {
+		t.Errorf("expected line 42 to have IsError=true")
+	}
+}
+
+func TestIncident_PHPVersionPersistence(t *testing.T) {
+	incRepo, _, cleanup := setupTestDB(t)
+	defer cleanup()
+
+	ctx := context.Background()
+
+	// 1. Ingest event with direct PHPVersion
+	evt1 := domain.IncomingEvent{
+		ProjectID:   1,
+		ProjectName: "Default Project",
+		ProjectKey:  "test-api-key",
+		Payload: domain.EventPayload{
+			ExceptionClass: "Error",
+			Message:        "Direct PHP version test",
+			File:           "app/Services/Test.php",
+			Line:           10,
+			PHPVersion:     "8.2.18",
+		},
+	}
+	res1, err := incRepo.UpsertIncident(ctx, evt1, "hash-php-1")
+	if err != nil {
+		t.Fatalf("UpsertIncident failed: %v", err)
+	}
+
+	inc1, err := incRepo.GetIncidentByID(ctx, res1.IncidentID)
+	if err != nil {
+		t.Fatalf("GetIncidentByID failed: %v", err)
+	}
+	if inc1.PHPVersion != "8.2.18" {
+		t.Errorf("expected PHPVersion 8.2.18, got %q", inc1.PHPVersion)
+	}
+
+	// 2. Ingest event with PHP version inside tags["php_version"]
+	evt2 := domain.IncomingEvent{
+		ProjectID:   1,
+		ProjectName: "Default Project",
+		ProjectKey:  "test-api-key",
+		Payload: domain.EventPayload{
+			ExceptionClass: "Error",
+			Message:        "Tag PHP version test",
+			File:           "app/Services/Test2.php",
+			Line:           20,
+			Tags: map[string]string{
+				"php_version": "8.3.4",
+			},
+		},
+	}
+	res2, err := incRepo.UpsertIncident(ctx, evt2, "hash-php-2")
+	if err != nil {
+		t.Fatalf("UpsertIncident failed: %v", err)
+	}
+
+	inc2, err := incRepo.GetIncidentByID(ctx, res2.IncidentID)
+	if err != nil {
+		t.Fatalf("GetIncidentByID failed: %v", err)
+	}
+	if inc2.PHPVersion != "8.3.4" {
+		t.Errorf("expected PHPVersion 8.3.4 from tags, got %q", inc2.PHPVersion)
+	}
+
+	// 3. Test list incidents returns PHPVersion
+	list, err := incRepo.GetIncidents(ctx, domain.IncidentFilter{Status: "all"})
+	if err != nil {
+		t.Fatalf("GetIncidents failed: %v", err)
+	}
+	found := false
+	for _, item := range list {
+		if item.ID == inc1.ID && item.PHPVersion == "8.2.18" {
+			found = true
+			break
+		}
+	}
+	if !found {
+		t.Errorf("expected to find incident with PHPVersion in GetIncidents list")
+	}
+}
+

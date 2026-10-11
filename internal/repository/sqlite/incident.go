@@ -3,6 +3,7 @@ package sqlite
 import (
 	"context"
 	"database/sql"
+	"encoding/json"
 	"fmt"
 	"log"
 	"strings"
@@ -31,6 +32,14 @@ func (r *IncidentRepo) UpsertIncident(ctx context.Context, event domain.Incoming
 	if incomingEnv == "" {
 		incomingEnv = "production"
 	}
+	incomingPHPVer := strings.TrimSpace(event.Payload.PHPVersion)
+	if incomingPHPVer == "" && event.Payload.Tags != nil {
+		if v, ok := event.Payload.Tags["php_version"]; ok {
+			incomingPHPVer = strings.TrimSpace(v)
+		} else if v, ok := event.Payload.Tags["php"]; ok {
+			incomingPHPVer = strings.TrimSpace(v)
+		}
+	}
 
 	// 1. Auto-register release if provided
 	if incomingRel != "" && r.releaseRepo != nil {
@@ -58,14 +67,22 @@ func (r *IncidentRepo) UpsertIncident(ctx context.Context, event domain.Incoming
 		&existing.resolvedInRelease, &existing.resolvedAt, &existing.lastRelease,
 	)
 
+	var snippetJSON sql.NullString
+	if event.Payload.CodeSnippet != nil {
+		if b, err := json.Marshal(event.Payload.CodeSnippet); err == nil {
+			snippetJSON = sql.NullString{String: string(b), Valid: true}
+		}
+	}
+
 	// Case A: New incident
 	if err == sql.ErrNoRows {
 		insertQuery := `
 		INSERT INTO incidents (
 			project_id, hash, exception_class, message, file, line, 
 			stack_trace, app_url, request_url, events_count, first_seen_at, last_seen_at,
-			environment, first_release, last_release, status, is_regression
-		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 1, ?, ?, ?, ?, ?, 'unresolved', 0)
+			environment, first_release, last_release, status, is_regression, code_snippet,
+			php_version
+		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 1, ?, ?, ?, ?, ?, 'unresolved', 0, ?, ?)
 		RETURNING id;
 		`
 		var newID int64
@@ -73,7 +90,7 @@ func (r *IncidentRepo) UpsertIncident(ctx context.Context, event domain.Incoming
 			event.ProjectID, hash, event.Payload.ExceptionClass, event.Payload.Message,
 			event.Payload.File, event.Payload.Line, event.Payload.StackTrace,
 			event.Payload.AppURL, event.Payload.RequestURL, now, now,
-			incomingEnv, incomingRel, incomingRel,
+			incomingEnv, incomingRel, incomingRel, snippetJSON, incomingPHPVer,
 		).Scan(&newID)
 		if err != nil {
 			return nil, err
@@ -147,10 +164,12 @@ func (r *IncidentRepo) UpsertIncident(ctx context.Context, event domain.Incoming
 				message = ?,
 				last_release = CASE WHEN ? != '' THEN ? ELSE last_release END,
 				status = 'unresolved',
-				is_regression = 1
+				is_regression = 1,
+				code_snippet = CASE WHEN ? IS NOT NULL THEN ? ELSE code_snippet END,
+				php_version = CASE WHEN ? != '' THEN ? ELSE php_version END
 			WHERE id = ?;
 			`
-			_, err = r.db.ExecContext(ctx, updateQuery, now, event.Payload.Message, incomingRel, incomingRel, existing.id)
+			_, err = r.db.ExecContext(ctx, updateQuery, now, event.Payload.Message, incomingRel, incomingRel, snippetJSON, snippetJSON, incomingPHPVer, incomingPHPVer, existing.id)
 			if err != nil {
 				return nil, err
 			}
@@ -175,10 +194,11 @@ func (r *IncidentRepo) UpsertIncident(ctx context.Context, event domain.Incoming
 		quietQuery := `
 		UPDATE incidents SET
 			events_count = events_count + 1,
-			last_seen_at = ?
+			last_seen_at = ?,
+			php_version = CASE WHEN ? != '' THEN ? ELSE php_version END
 		WHERE id = ?;
 		`
-		_, err = r.db.ExecContext(ctx, quietQuery, now, existing.id)
+		_, err = r.db.ExecContext(ctx, quietQuery, now, incomingPHPVer, incomingPHPVer, existing.id)
 		if err != nil {
 			return nil, err
 		}
@@ -205,10 +225,12 @@ func (r *IncidentRepo) UpsertIncident(ctx context.Context, event domain.Incoming
 		events_count = events_count + 1,
 		last_seen_at = ?,
 		message = ?,
-		last_release = CASE WHEN ? != '' THEN ? ELSE last_release END
+		last_release = CASE WHEN ? != '' THEN ? ELSE last_release END,
+		code_snippet = CASE WHEN ? IS NOT NULL THEN ? ELSE code_snippet END,
+		php_version = CASE WHEN ? != '' THEN ? ELSE php_version END
 	WHERE id = ?;
 	`
-	_, err = r.db.ExecContext(ctx, updateQuery, now, event.Payload.Message, incomingRel, incomingRel, existing.id)
+	_, err = r.db.ExecContext(ctx, updateQuery, now, event.Payload.Message, incomingRel, incomingRel, snippetJSON, snippetJSON, incomingPHPVer, incomingPHPVer, existing.id)
 	if err != nil {
 		return nil, err
 	}
@@ -337,7 +359,8 @@ func (r *IncidentRepo) GetIncidents(ctx context.Context, filter domain.IncidentF
 			i.hash, i.exception_class, i.message, i.file, i.line, i.app_url, i.request_url, 
 			i.events_count, i.first_seen_at, i.last_seen_at,
 			i.environment, COALESCE(i.first_release, ''), COALESCE(i.last_release, ''),
-			i.status, COALESCE(i.resolved_in_release, ''), i.resolved_at, i.is_regression
+			i.status, COALESCE(i.resolved_in_release, ''), i.resolved_at, i.is_regression,
+			COALESCE(i.php_version, '')
 		FROM incidents i
 		LEFT JOIN projects p ON i.project_id = p.id
 	`
@@ -382,6 +405,7 @@ func (r *IncidentRepo) GetIncidents(ctx context.Context, filter domain.IncidentF
 			&inc.EventsCount, &inc.FirstSeenAt, &inc.LastSeenAt,
 			&inc.Environment, &inc.FirstRelease, &inc.LastRelease,
 			&inc.Status, &inc.ResolvedInRelease, &resolvedAt, &isRegrInt,
+			&inc.PHPVersion,
 		); err != nil {
 			log.Printf("Error scanning row: %v", err)
 			continue
@@ -416,7 +440,9 @@ func (r *IncidentRepo) GetIncidentByID(ctx context.Context, id int64) (*domain.I
 			i.hash, i.exception_class, i.message, i.file, i.line, i.stack_trace, 
 			i.app_url, i.request_url, i.events_count, i.first_seen_at, i.last_seen_at,
 			i.environment, COALESCE(i.first_release, ''), COALESCE(i.last_release, ''),
-			i.status, COALESCE(i.resolved_in_release, ''), i.resolved_at, i.is_regression
+			i.status, COALESCE(i.resolved_in_release, ''), i.resolved_at, i.is_regression,
+			COALESCE(i.code_snippet, ''),
+			COALESCE(i.php_version, '')
 		FROM incidents i
 		LEFT JOIN projects p ON i.project_id = p.id
 		WHERE i.id = ?`, id)
@@ -424,12 +450,15 @@ func (r *IncidentRepo) GetIncidentByID(ctx context.Context, id int64) (*domain.I
 	var inc domain.Incident
 	var resolvedAt sql.NullTime
 	var isRegrInt int
+	var snippetRaw string
 	err := row.Scan(
 		&inc.ID, &inc.ProjectID, &inc.ProjectName, &inc.Hash, &inc.ExceptionClass, &inc.Message,
 		&inc.File, &inc.Line, &inc.StackTrace, &inc.AppURL, &inc.RequestURL,
 		&inc.EventsCount, &inc.FirstSeenAt, &inc.LastSeenAt,
 		&inc.Environment, &inc.FirstRelease, &inc.LastRelease,
 		&inc.Status, &inc.ResolvedInRelease, &resolvedAt, &isRegrInt,
+		&snippetRaw,
+		&inc.PHPVersion,
 	)
 	if err != nil {
 		return nil, err
@@ -438,6 +467,12 @@ func (r *IncidentRepo) GetIncidentByID(ctx context.Context, id int64) (*domain.I
 		inc.ResolvedAt = &resolvedAt.Time
 	}
 	inc.IsRegression = isRegrInt == 1
+	if snippetRaw != "" {
+		var snippet domain.CodeSnippet
+		if err := json.Unmarshal([]byte(snippetRaw), &snippet); err == nil {
+			inc.CodeSnippet = &snippet
+		}
+	}
 	return &inc, nil
 }
 

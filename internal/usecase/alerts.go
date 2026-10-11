@@ -51,13 +51,19 @@ func (a *AlertManager) processAlerts(ctx context.Context) {
 			sb.WriteString(fmt.Sprintf("⚠️ **РЕГРЕССИЯ** (вернулась в `%s`, решена в `%s`)\n", incident.LastRelease, incident.ResolvedInRelease))
 		}
 		sb.WriteString(fmt.Sprintf("🔴 **%s** (x%d)\n", incident.ExceptionClass, incident.EventsCount))
+		var metaParts []string
 		if incident.LastRelease != "" {
-			envStr := incident.Environment
-			if envStr == "" {
-				envStr = "production"
-			}
-			sb.WriteString(fmt.Sprintf("📦 Релиз: `%s` | Среда: `%s`\n", incident.LastRelease, envStr))
+			metaParts = append(metaParts, fmt.Sprintf("📦 Релиз: `%s`", incident.LastRelease))
 		}
+		envStr := incident.Environment
+		if envStr == "" {
+			envStr = "production"
+		}
+		metaParts = append(metaParts, fmt.Sprintf("Среда: `%s`", envStr))
+		if incident.PHPVersion != "" {
+			metaParts = append(metaParts, fmt.Sprintf("🐘 PHP: `%s`", incident.PHPVersion))
+		}
+		sb.WriteString(strings.Join(metaParts, " | ") + "\n")
 		sb.WriteString(fmt.Sprintf("`%s:%d`\n", incident.File, incident.Line))
 		sb.WriteString(fmt.Sprintf("_%s_\n\n", incident.Message))
 	}

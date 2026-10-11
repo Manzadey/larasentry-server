@@ -33,7 +33,11 @@ func InitDB(dbPath string) (*sql.DB, error) {
 	CREATE TABLE IF NOT EXISTS projects (
 		id INTEGER PRIMARY KEY AUTOINCREMENT,
 		name TEXT NOT NULL,
-		api_key TEXT NOT NULL UNIQUE
+		api_key TEXT NOT NULL UNIQUE,
+		github_repo TEXT,
+		github_token TEXT,
+		github_branch TEXT DEFAULT 'main',
+		path_prefix TEXT
 	);
 
 	CREATE TABLE IF NOT EXISTS releases (
@@ -68,6 +72,8 @@ func InitDB(dbPath string) (*sql.DB, error) {
 		resolved_in_release TEXT,
 		resolved_at DATETIME,
 		is_regression INTEGER NOT NULL DEFAULT 0,
+		code_snippet TEXT,
+		php_version TEXT,
 		FOREIGN KEY(project_id) REFERENCES projects(id)
 	);
 	`
@@ -77,6 +83,9 @@ func InitDB(dbPath string) (*sql.DB, error) {
 	}
 
 	// 1. Idempotent migration for existing tables that may miss the new columns
+	if err := migrateProjectsColumns(db); err != nil {
+		return nil, fmt.Errorf("project migration failed: %w", err)
+	}
 	if err := migrateIncidentsColumns(db); err != nil {
 		return nil, fmt.Errorf("incident migration failed: %w", err)
 	}
@@ -133,6 +142,8 @@ func migrateIncidentsColumns(db *sql.DB) error {
 		{"resolved_in_release", "TEXT"},
 		{"resolved_at", "DATETIME"},
 		{"is_regression", "INTEGER NOT NULL DEFAULT 0"},
+		{"code_snippet", "TEXT"},
+		{"php_version", "TEXT"},
 	}
 
 	for _, col := range columnsToAdd {
@@ -142,6 +153,48 @@ func migrateIncidentsColumns(db *sql.DB) error {
 				return fmt.Errorf("failed adding column %s: %w", col.name, err)
 			}
 			log.Printf("[DB] Added column %s to incidents", col.name)
+		}
+	}
+
+	return nil
+}
+
+func migrateProjectsColumns(db *sql.DB) error {
+	rows, err := db.Query("PRAGMA table_info(projects);")
+	if err != nil {
+		return err
+	}
+	defer rows.Close()
+
+	existing := make(map[string]bool)
+	for rows.Next() {
+		var cid int
+		var name, colType string
+		var notNull, pk int
+		var dfltValue sql.NullString
+		if err := rows.Scan(&cid, &name, &colType, &notNull, &dfltValue, &pk); err != nil {
+			return err
+		}
+		existing[name] = true
+	}
+
+	columnsToAdd := []struct {
+		name string
+		def  string
+	}{
+		{"github_repo", "TEXT"},
+		{"github_token", "TEXT"},
+		{"github_branch", "TEXT DEFAULT 'main'"},
+		{"path_prefix", "TEXT"},
+	}
+
+	for _, col := range columnsToAdd {
+		if !existing[col.name] {
+			stmt := fmt.Sprintf("ALTER TABLE projects ADD COLUMN %s %s;", col.name, col.def)
+			if _, err := db.Exec(stmt); err != nil {
+				return fmt.Errorf("failed adding column %s: %w", col.name, err)
+			}
+			log.Printf("[DB] Added column %s to projects", col.name)
 		}
 	}
 

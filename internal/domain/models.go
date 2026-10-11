@@ -36,6 +36,25 @@ type EventPayload struct {
 	User           *UserContext      `json:"user,omitempty"`
 	Tags           map[string]string `json:"tags,omitempty"`
 	Fingerprint    []string          `json:"fingerprint,omitempty"`
+	Commit         string            `json:"commit,omitempty"`
+	CodeSnippet    *CodeSnippet      `json:"code_snippet,omitempty"`
+	PHPVersion     string            `json:"php_version,omitempty"`
+}
+
+// CodeLine represents a single line of source code surrounding an error
+type CodeLine struct {
+	Number  int    `json:"number"`
+	Code    string `json:"code"`
+	IsError bool   `json:"is_error"`
+}
+
+// CodeSnippet represents a code fragment around the line where an error occurred
+type CodeSnippet struct {
+	File      string     `json:"file"`
+	Line      int        `json:"line"`
+	Lines     []CodeLine `json:"lines"`
+	GitHubURL string     `json:"github_url,omitempty"`
+	Source    string     `json:"source,omitempty"` // "client" | "github"
 }
 
 // IncomingEvent represents an internal event passed through the channel
@@ -49,9 +68,13 @@ type IncomingEvent struct {
 
 // Project represents a client application
 type Project struct {
-	ID     int64  `json:"id"`
-	Name   string `json:"name"`
-	APIKey string `json:"api_key"`
+	ID           int64  `json:"id"`
+	Name         string `json:"name"`
+	APIKey       string `json:"api_key"`
+	GitHubRepo   string `json:"github_repo,omitempty"`
+	GitHubToken  string `json:"github_token,omitempty"`
+	GitHubBranch string `json:"github_branch,omitempty"`
+	PathPrefix   string `json:"path_prefix,omitempty"`
 }
 
 // Release represents a tracked application version
@@ -87,6 +110,8 @@ type Incident struct {
 	ResolvedInRelease string         `json:"resolved_in_release,omitempty"`
 	ResolvedAt        *time.Time     `json:"resolved_at,omitempty"`
 	IsRegression      bool           `json:"is_regression"`
+	CodeSnippet       *CodeSnippet   `json:"code_snippet,omitempty"`
+	PHPVersion        string         `json:"php_version,omitempty"`
 }
 
 // IncidentDetail represents extended incident view with parsed stack frames
@@ -94,6 +119,7 @@ type IncidentDetail struct {
 	Incident
 	AppStackTrace   string          `json:"app_stack_trace"`
 	StackTraceStats StackTraceStats `json:"stack_trace_stats"`
+	CodeSnippet     *CodeSnippet    `json:"code_snippet,omitempty"`
 }
 
 // IncidentFilter represents parameters for filtering incidents
@@ -184,7 +210,9 @@ type UpsertResult struct {
 type ProjectRepository interface {
 	GetIDByKey(ctx context.Context, apiKey string) (int64, error)
 	GetByKey(ctx context.Context, apiKey string) (*Project, error)
+	GetByID(ctx context.Context, id int64) (*Project, error)
 	GetAllProjects(ctx context.Context) ([]Project, error)
+	UpdateGitHubSettings(ctx context.Context, id int64, repo, token, branch, pathPrefix string) error
 }
 
 // ReleaseRepository describes operations for releases

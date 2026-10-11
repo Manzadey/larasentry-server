@@ -508,6 +508,59 @@ paths:
         '401':
           $ref: '#/components/responses/Unauthorized'
 
+  /api/projects/{id}/github:
+    put:
+      summary: Настройка интеграции с GitHub
+      description: Привязка репозитория GitHub, токена доступа (PAT), ветки и префикса путей к проекту.
+      tags:
+        - Projects (Проекты)
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          description: ID проекта
+          schema:
+            type: integer
+            example: 1
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                github_repo:
+                  type: string
+                  example: Manzadey/larasentry-server
+                github_token:
+                  type: string
+                  example: ghp_xxxxxxxxxxxxxxxxxxxx
+                github_branch:
+                  type: string
+                  example: main
+                path_prefix:
+                  type: string
+                  example: /var/www/html
+      responses:
+        '200':
+          description: Настройки GitHub успешно обновлены
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  status:
+                    type: string
+                    example: ok
+                  message:
+                    type: string
+                  project_id:
+                    type: integer
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+
   /api/health:
     get:
       summary: Проверка работоспособности сервиса (Health Check)
@@ -649,6 +702,10 @@ components:
           description: Окружение приложения (production, staging, local и т.д.)
           example: production
           default: production
+        php_version:
+          type: string
+          description: Версия PHP runtime на клиенте (из константы PHP_VERSION)
+          example: 8.2.18
         app_url:
           type: string
           description: Базовый URL приложения (APP_URL)
@@ -776,6 +833,10 @@ components:
           type: string
           example: 1.4.2
           description: Версия последнего сбоя
+        php_version:
+          type: string
+          example: 8.2.18
+          description: Версия PHP runtime, на которой произошел сбой
         status:
           type: string
           enum: [unresolved, resolved, ignored]

@@ -364,3 +364,35 @@ func TestHandleHealthCheck(t *testing.T) {
 		t.Errorf("expected ok & healthy, got status: %s, database: %s", status.Status, status.Database)
 	}
 }
+
+func TestHandleUpdateProjectGitHub(t *testing.T) {
+	handler, _, _ := setupTestAPIHandler(t)
+
+	body := map[string]string{
+		"github_repo":   "Manzadey/larasentry-server",
+		"github_token":  "ghp_testtoken123",
+		"github_branch": "main",
+		"path_prefix":   "/var/www/html",
+	}
+	bodyBytes, _ := json.Marshal(body)
+
+	req := httptest.NewRequest(http.MethodPut, "/api/projects/1/github", bytes.NewReader(bodyBytes))
+	req.Header.Set("Authorization", "Bearer test-key")
+	req.Header.Set("Content-Type", "application/json")
+	req.SetPathValue("id", "1")
+	rec := httptest.NewRecorder()
+
+	handler.HandleUpdateProjectGitHub(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected status 200, got %d: %s", rec.Code, rec.Body.String())
+	}
+
+	var res map[string]interface{}
+	if err := json.NewDecoder(rec.Body).Decode(&res); err != nil {
+		t.Fatalf("failed to decode response: %v", err)
+	}
+	if res["status"] != "ok" {
+		t.Errorf("expected status 'ok', got %v", res["status"])
+	}
+}

@@ -11,6 +11,7 @@ import (
 
 	"server/internal/delivery/sse"
 	"server/internal/domain"
+	"server/internal/pkg/github"
 	"server/web"
 )
 
@@ -19,6 +20,7 @@ type UIHandler struct {
 	incidentRepo domain.IncidentRepository
 	releaseRepo  domain.ReleaseRepository
 	sseBroker    *sse.Broker
+	githubClient *github.Client
 	tmpl         *template.Template
 }
 
@@ -68,6 +70,11 @@ func NewUIHandler(
 	}
 
 	return h, nil
+}
+
+// SetGitHubClient sets the GitHub API client for fetching file snippets
+func (h *UIHandler) SetGitHubClient(client *github.Client) {
+	h.githubClient = client
 }
 
 // GetRowTemplate returns the parsed single row template for SSE broadcasting
@@ -239,8 +246,25 @@ func (h *UIHandler) HandleIncidentDetail(w http.ResponseWriter, r *http.Request)
 		}
 	}
 
+	var project *domain.Project
+	if h.projectRepo != nil && incident.ProjectID > 0 {
+		project, _ = h.projectRepo.GetByID(ctx, incident.ProjectID)
+	}
+
+	codeSnippet, _ := github.ResolveCodeSnippet(ctx, h.githubClient, project, incident, 5)
+
+	var issueURL string
+	if project != nil && project.GitHubRepo != "" {
+		title := fmt.Sprintf("[%s] %s", incident.ExceptionClass, incident.Message)
+		body := fmt.Sprintf("### Exception\n**Class:** `%s`\n**File:** `%s:%d`\n\n```\n%s\n```\n\n*Reported by Larasentry*", incident.ExceptionClass, incident.File, incident.Line, incident.StackTrace)
+		issueURL = github.BuildIssueURL(project.GitHubRepo, title, body)
+	}
+
 	data := map[string]interface{}{
 		"Incident":      incident,
+		"Project":       project,
+		"CodeSnippet":   codeSnippet,
+		"IssueURL":      issueURL,
 		"LatestRelease": latestRelease,
 		"AppStackTrace": incident.AppStackTrace(),
 		"Stats":         incident.StackTraceStats(),
@@ -287,4 +311,45 @@ func (h *UIHandler) HandleEventsStream(w http.ResponseWriter, r *http.Request) {
 			flusher.Flush()
 		}
 	}
+}
+
+// HandleUpdateProjectGitHubSettings handles POST /ui/projects/github-settings
+func (h *UIHandler) HandleUpdateProjectGitHubSettings(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	if err := r.ParseForm(); err != nil {
+		http.Error(w, "Invalid form data", http.StatusBadRequest)
+		return
+	}
+
+	projectID, err := strconv.ParseInt(r.FormValue("project_id"), 10, 64)
+	if err != nil {
+		http.Error(w, "Invalid project ID", http.StatusBadRequest)
+		return
+	}
+
+	repo := strings.TrimSpace(r.FormValue("github_repo"))
+	token := strings.TrimSpace(r.FormValue("github_token"))
+	branch := strings.TrimSpace(r.FormValue("github_branch"))
+	prefix := strings.TrimSpace(r.FormValue("path_prefix"))
+
+	// If token wasn't updated (empty in form submission), keep the existing token
+	if token == "" {
+		existing, err := h.projectRepo.GetByID(r.Context(), projectID)
+		if err == nil && existing != nil {
+			token = existing.GitHubToken
+		}
+	}
+
+	if err := h.projectRepo.UpdateGitHubSettings(r.Context(), projectID, repo, token, branch, prefix); err != nil {
+		log.Printf("Error updating github settings for project %d: %v", projectID, err)
+		http.Error(w, "Failed to update settings", http.StatusInternalServerError)
+		return
+	}
+
+	w.Header().Set("HX-Trigger", "github-settings-updated")
+	http.Redirect(w, r, "/ui", http.StatusSeeOther)
 }

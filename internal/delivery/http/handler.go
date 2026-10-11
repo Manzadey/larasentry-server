@@ -160,6 +160,14 @@ func (h *APIHandler) HandleEvent(w http.ResponseWriter, r *http.Request) {
 	payload.AppURL = strings.TrimSpace(payload.AppURL)
 	payload.RequestURL = strings.TrimSpace(payload.RequestURL)
 	payload.StackTrace = strings.TrimSpace(payload.StackTrace)
+	payload.PHPVersion = strings.TrimSpace(payload.PHPVersion)
+	if payload.PHPVersion == "" && payload.Tags != nil {
+		if v, ok := payload.Tags["php_version"]; ok {
+			payload.PHPVersion = strings.TrimSpace(v)
+		} else if v, ok := payload.Tags["php"]; ok {
+			payload.PHPVersion = strings.TrimSpace(v)
+		}
+	}
 
 	if payload.ExceptionClass == "" || payload.Message == "" {
 		writeError(w, http.StatusBadRequest, "Bad Request - Missing exception_class or message")
@@ -231,6 +239,14 @@ func (h *APIHandler) HandleBatchEvents(w http.ResponseWriter, r *http.Request) {
 		payload.AppURL = strings.TrimSpace(payload.AppURL)
 		payload.RequestURL = strings.TrimSpace(payload.RequestURL)
 		payload.StackTrace = strings.TrimSpace(payload.StackTrace)
+		payload.PHPVersion = strings.TrimSpace(payload.PHPVersion)
+		if payload.PHPVersion == "" && payload.Tags != nil {
+			if v, ok := payload.Tags["php_version"]; ok {
+				payload.PHPVersion = strings.TrimSpace(v)
+			} else if v, ok := payload.Tags["php"]; ok {
+				payload.PHPVersion = strings.TrimSpace(v)
+			}
+		}
 
 		if payload.ExceptionClass == "" || payload.Message == "" {
 			continue
@@ -834,4 +850,47 @@ func (h *APIHandler) HandleHealthCheck(w http.ResponseWriter, r *http.Request) {
 	}
 
 	writeJSON(w, http.StatusOK, status)
+}
+
+// HandleUpdateProjectGitHub handles PUT /api/projects/{id}/github
+func (h *APIHandler) HandleUpdateProjectGitHub(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPut && r.Method != http.MethodPost {
+		writeError(w, http.StatusMethodNotAllowed, "Method not allowed")
+		return
+	}
+
+	_, err := h.authenticate(r)
+	if err != nil {
+		writeError(w, http.StatusUnauthorized, "Unauthorized - "+err.Error())
+		return
+	}
+
+	idStr := getPathParam(r, "id")
+	id, err := strconv.ParseInt(idStr, 10, 64)
+	if err != nil {
+		writeError(w, http.StatusBadRequest, "Invalid project ID")
+		return
+	}
+
+	var req struct {
+		GitHubRepo   string `json:"github_repo"`
+		GitHubToken  string `json:"github_token"`
+		GitHubBranch string `json:"github_branch"`
+		PathPrefix   string `json:"path_prefix"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		writeError(w, http.StatusBadRequest, "Bad Request - Invalid JSON")
+		return
+	}
+
+	if err := h.projectRepo.UpdateGitHubSettings(r.Context(), id, req.GitHubRepo, req.GitHubToken, req.GitHubBranch, req.PathPrefix); err != nil {
+		writeError(w, http.StatusInternalServerError, "Failed to update GitHub settings: "+err.Error())
+		return
+	}
+
+	writeJSON(w, http.StatusOK, map[string]interface{}{
+		"status":     "ok",
+		"message":    "GitHub settings updated successfully",
+		"project_id": id,
+	})
 }

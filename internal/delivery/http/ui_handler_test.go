@@ -23,6 +23,12 @@ func (m *mockProjectRepo) GetByKey(ctx context.Context, apiKey string) (*domain.
 func (m *mockProjectRepo) GetAllProjects(ctx context.Context) ([]domain.Project, error) {
 	return []domain.Project{{ID: 1, Name: "Test Project"}}, nil
 }
+func (m *mockProjectRepo) GetByID(ctx context.Context, id int64) (*domain.Project, error) {
+	return &domain.Project{ID: id, Name: "Test Project", APIKey: "test-key"}, nil
+}
+func (m *mockProjectRepo) UpdateGitHubSettings(ctx context.Context, id int64, repo, token, branch, pathPrefix string) error {
+	return nil
+}
 
 type mockReleaseRepo struct{}
 
@@ -187,3 +193,115 @@ func TestHandleIncidentDetail_ManualResolveAndReopen(t *testing.T) {
 		t.Errorf("expected HX-Trigger header on reopen to be 'incident-updated'")
 	}
 }
+
+func TestHandleIncidentDetail_WithGitHubAndSnippet(t *testing.T) {
+	mockInc := &domain.Incident{
+		ID:             100,
+		ProjectID:      1,
+		ProjectName:    "Test Project",
+		Hash:           "hash100",
+		ExceptionClass: "RuntimeException",
+		Message:        "Something went wrong",
+		File:           "/var/www/html/app/Http/Controllers/OrderController.php",
+		Line:           42,
+		Status:         domain.StatusUnresolved,
+		EventsCount:    1,
+		FirstSeenAt:    time.Now(),
+		LastSeenAt:     time.Now(),
+		CodeSnippet: &domain.CodeSnippet{
+			File: "app/Http/Controllers/OrderController.php",
+			Line: 42,
+			Lines: []domain.CodeLine{
+				{Number: 41, Code: "    $cart = $request->user()->cart();", IsError: false},
+				{Number: 42, Code: "    $total = $cart->items->sum('price');", IsError: true},
+				{Number: 43, Code: "    return response()->json(['total' => $total]);", IsError: false},
+			},
+			GitHubURL: "https://github.com/myorg/myapp/blob/main/app/Http/Controllers/OrderController.php#L42",
+			Source:    "client",
+		},
+	}
+
+	handler, err := NewUIHandler(&mockProjectRepo{}, &mockIncidentRepo{incident: mockInc}, &mockReleaseRepo{}, sse.NewBroker())
+	if err != nil {
+		t.Fatalf("failed to create UIHandler: %v", err)
+	}
+
+	req := httptest.NewRequest(http.MethodGet, "/ui/incidents/100", nil)
+	rec := httptest.NewRecorder()
+	handler.HandleIncidentDetail(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected status 200, got %d", rec.Code)
+	}
+
+	body := rec.Body.String()
+	// Should render the GitHub link
+	if !strings.Contains(body, "https://github.com/myorg/myapp/blob/main/app/Http/Controllers/OrderController.php#L42") {
+		t.Errorf("rendered HTML does not contain GitHub link")
+	}
+	// Should render snippet code lines
+	if !strings.Contains(body, "$total = $cart") {
+		t.Errorf("rendered HTML does not contain snippet code")
+	}
+}
+
+func TestHandleIncidentDetail_PHPVersion(t *testing.T) {
+	mockInc := &domain.Incident{
+		ID:             55,
+		ProjectID:      1,
+		ProjectName:    "Test Project",
+		Hash:           "hash55",
+		ExceptionClass: "DivisionByZeroError",
+		Message:        "Division by zero",
+		File:           "/var/www/html/app/Http/Controllers/MathController.php",
+		Line:           15,
+		Status:         domain.StatusUnresolved,
+		EventsCount:    2,
+		FirstSeenAt:    time.Now(),
+		LastSeenAt:     time.Now(),
+		PHPVersion:     "8.2.18",
+	}
+
+	handler, err := NewUIHandler(&mockProjectRepo{}, &mockIncidentRepo{incident: mockInc}, &mockReleaseRepo{}, sse.NewBroker())
+	if err != nil {
+		t.Fatalf("failed to create UIHandler: %v", err)
+	}
+
+	req := httptest.NewRequest(http.MethodGet, "/ui/incidents/55", nil)
+	rec := httptest.NewRecorder()
+	handler.HandleIncidentDetail(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected status 200, got %d", rec.Code)
+	}
+
+	body := rec.Body.String()
+	if !strings.Contains(body, "PHP 8.2.18") {
+		t.Errorf("expected body to contain 'PHP 8.2.18', got: %s", body)
+	}
+	if !strings.Contains(body, "Версия PHP") {
+		t.Errorf("expected body to contain 'Версия PHP'")
+	}
+}
+
+func TestHandleUpdateProjectGitHubSettings_Form(t *testing.T) {
+	handler, err := NewUIHandler(&mockProjectRepo{}, &mockIncidentRepo{}, &mockReleaseRepo{}, sse.NewBroker())
+	if err != nil {
+		t.Fatalf("failed to create UIHandler: %v", err)
+	}
+
+	form := strings.NewReader("project_id=1&github_repo=myorg/myrepo&github_token=ghp_tok123&github_branch=main&path_prefix=/var/www")
+	req := httptest.NewRequest(http.MethodPost, "/ui/projects/github-settings", form)
+	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	rec := httptest.NewRecorder()
+
+	handler.HandleUpdateProjectGitHubSettings(rec, req)
+
+	if rec.Code != http.StatusSeeOther && rec.Code != http.StatusOK {
+		t.Fatalf("expected status 303 or 200, got %d", rec.Code)
+	}
+	if rec.Header().Get("HX-Trigger") != "github-settings-updated" {
+		t.Errorf("expected HX-Trigger 'github-settings-updated'")
+	}
+}
+
