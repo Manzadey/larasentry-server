@@ -106,6 +106,7 @@ func main() {
 	mux := http.NewServeMux()
 	mux.HandleFunc("/api/events", apiHandler.HandleEvent)
 	mux.HandleFunc("/api/incidents", apiHandler.HandleListIncidents)
+	mux.HandleFunc("/api/incidents/", apiHandler.HandleIncidentAction)
 	mux.HandleFunc("/swagger/", httpSwagger.WrapHandler)
 
 	// UI routes

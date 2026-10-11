@@ -189,13 +189,16 @@ func (h *UIHandler) HandleIncidentDetail(w http.ResponseWriter, r *http.Request)
 		action := pathParts[3]
 		if action == "resolve" && r.Method == http.MethodPost {
 			resType := r.FormValue("type")
+			if resType == "" {
+				resType = "immediate"
+			}
 			version := r.FormValue("version")
 			if err := h.incidentRepo.ResolveIncident(ctx, id, resType, version); err != nil {
 				log.Printf("Error resolving incident %d: %v", id, err)
 				http.Error(w, "Failed to resolve incident", http.StatusInternalServerError)
 				return
 			}
-			// Add HX-Trigger header so HTMX refreshes the main table row if needed
+			// Add HX-Trigger header so HTMX refreshes the main table counters
 			w.Header().Set("HX-Trigger", "incident-updated")
 		} else if action == "reopen" && r.Method == http.MethodPost {
 			if err := h.incidentRepo.ReopenIncident(ctx, id); err != nil {
@@ -204,6 +207,20 @@ func (h *UIHandler) HandleIncidentDetail(w http.ResponseWriter, r *http.Request)
 				return
 			}
 			w.Header().Set("HX-Trigger", "incident-updated")
+		}
+
+		if r.URL.Query().Get("view") == "row" {
+			updatedInc, err := h.incidentRepo.GetIncidentByID(ctx, id)
+			if err != nil {
+				http.Error(w, "Incident not found", http.StatusNotFound)
+				return
+			}
+			w.Header().Set("Content-Type", "text/html; charset=utf-8")
+			if err := h.tmpl.ExecuteTemplate(w, "incident_row.html", updatedInc); err != nil {
+				log.Printf("Error rendering incident row: %v", err)
+				http.Error(w, "Internal Server Error", http.StatusInternalServerError)
+			}
+			return
 		}
 	}
 

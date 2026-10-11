@@ -116,3 +116,49 @@ func TestHandleIncidentDetail_WithStackTraceFilter(t *testing.T) {
 		t.Errorf("expected body to contain UserController.php(42)")
 	}
 }
+
+func TestHandleIncidentDetail_ManualResolveAndReopen(t *testing.T) {
+	mockInc := &domain.Incident{
+		ID:             42,
+		ProjectID:      1,
+		ProjectName:    "Test Project",
+		Hash:           "hash123",
+		ExceptionClass: "QueryException",
+		Message:        "SQLSTATE[HY000]: General error",
+		File:           "/var/www/html/app/Http/Controllers/UserController.php",
+		Line:           42,
+		Status:         domain.StatusUnresolved,
+		EventsCount:    1,
+		FirstSeenAt:    time.Now(),
+		LastSeenAt:     time.Now(),
+	}
+
+	handler, err := NewUIHandler(&mockProjectRepo{}, &mockIncidentRepo{incident: mockInc}, &mockReleaseRepo{}, sse.NewBroker())
+	if err != nil {
+		t.Fatalf("failed to create UIHandler: %v", err)
+	}
+
+	// 1. Resolve request with view=row
+	reqResolve := httptest.NewRequest(http.MethodPost, "/ui/incidents/42/resolve?type=immediate&view=row", nil)
+	recResolve := httptest.NewRecorder()
+	handler.HandleIncidentDetail(recResolve, reqResolve)
+
+	if recResolve.Code != http.StatusOK {
+		t.Fatalf("expected status 200 on resolve, got %d", recResolve.Code)
+	}
+	if recResolve.Header().Get("HX-Trigger") != "incident-updated" {
+		t.Errorf("expected HX-Trigger header to be 'incident-updated'")
+	}
+
+	// 2. Reopen request
+	reqReopen := httptest.NewRequest(http.MethodPost, "/ui/incidents/42/reopen?view=row", nil)
+	recReopen := httptest.NewRecorder()
+	handler.HandleIncidentDetail(recReopen, reqReopen)
+
+	if recReopen.Code != http.StatusOK {
+		t.Fatalf("expected status 200 on reopen, got %d", recReopen.Code)
+	}
+	if recReopen.Header().Get("HX-Trigger") != "incident-updated" {
+		t.Errorf("expected HX-Trigger header on reopen to be 'incident-updated'")
+	}
+}

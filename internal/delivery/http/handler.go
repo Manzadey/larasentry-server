@@ -5,8 +5,10 @@ import (
 	"log"
 	"net"
 	"net/http"
-	"server/internal/domain"
+	"strconv"
 	"strings"
+
+	"server/internal/domain"
 )
 
 type APIHandler struct {
@@ -165,4 +167,74 @@ func (h *APIHandler) HandleListIncidents(w http.ResponseWriter, r *http.Request)
 
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(incidents)
+}
+
+// HandleIncidentAction handles /api/incidents/{id}/resolve and /api/incidents/{id}/reopen
+func (h *APIHandler) HandleIncidentAction(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	authHeader := r.Header.Get("Authorization")
+	if authHeader == "" || !strings.HasPrefix(authHeader, "Bearer ") {
+		http.Error(w, "Unauthorized", http.StatusUnauthorized)
+		return
+	}
+	apiKey := strings.TrimPrefix(authHeader, "Bearer ")
+
+	projectID, err := h.projectRepo.GetIDByKey(r.Context(), apiKey)
+	if err != nil {
+		http.Error(w, "Unauthorized", http.StatusUnauthorized)
+		return
+	}
+
+	pathParts := strings.Split(strings.Trim(r.URL.Path, "/"), "/")
+	if len(pathParts) < 4 {
+		http.Error(w, "Invalid path", http.StatusBadRequest)
+		return
+	}
+
+	id, err := strconv.ParseInt(pathParts[2], 10, 64)
+	if err != nil {
+		http.Error(w, "Invalid incident ID", http.StatusBadRequest)
+		return
+	}
+
+	action := pathParts[3]
+	incident, err := h.incidentRepo.GetIncidentByID(r.Context(), id)
+	if err != nil || incident == nil {
+		http.Error(w, "Incident not found", http.StatusNotFound)
+		return
+	}
+
+	if incident.ProjectID != projectID {
+		http.Error(w, "Forbidden", http.StatusForbidden)
+		return
+	}
+
+	if action == "resolve" {
+		resType := r.URL.Query().Get("type")
+		if resType == "" {
+			resType = "immediate"
+		}
+		version := r.URL.Query().Get("version")
+		if err := h.incidentRepo.ResolveIncident(r.Context(), id, resType, version); err != nil {
+			http.Error(w, "Internal Server Error", http.StatusInternalServerError)
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		w.Write([]byte(`{"status":"resolved","id":` + strconv.FormatInt(id, 10) + `}`))
+		return
+	} else if action == "reopen" {
+		if err := h.incidentRepo.ReopenIncident(r.Context(), id); err != nil {
+			http.Error(w, "Internal Server Error", http.StatusInternalServerError)
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		w.Write([]byte(`{"status":"unresolved","id":` + strconv.FormatInt(id, 10) + `}`))
+		return
+	}
+
+	http.NotFound(w, r)
 }

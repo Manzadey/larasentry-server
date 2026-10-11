@@ -1,16 +1,26 @@
 openapi: 3.0.3
 info:
   title: LaraSentry API
-  version: 1.0.0
-  description: API documentation for LaraSentry Go Server.
+  version: 2.0.0
+  description: |
+    Расширенная спецификация REST API для Go-микросервиса LaraSentry.
+    Поддерживает прием ошибок от Laravel, управление жизненным циклом инцидентов,
+    трекинг релизов, аналитику и мониторинг в реальном времени.
 servers:
   - url: http://localhost:8080
-    description: Local server
+    description: Локальный сервер
 paths:
+  # ============================================================================
+  # 1. INGESTION (Прием ошибок)
+  # ============================================================================
   /api/events:
     post:
-      summary: Send a new error event
-      description: Receives an exception/error payload from a Laravel application.
+      summary: Отправить событие ошибки (Event Ingestion)
+      description: |
+        Асинхронный прием события ошибки из Laravel клиента.
+        Событие валидируется, помещается в очередь обработки и возвращает 202 Accepted.
+      tags:
+        - Events Ingestion
       security:
         - bearerAuth: []
       requestBody:
@@ -21,7 +31,45 @@ paths:
               $ref: '#/components/schemas/EventPayload'
       responses:
         '202':
-          description: Event accepted for processing
+          description: Событие успешно принято в обработку
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/EventAcceptedResponse'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '422':
+          $ref: '#/components/responses/UnprocessableEntity'
+
+  /api/events/batch:
+    post:
+      summary: Массовая отправка событий (Batch Ingestion)
+      description: Прием пачки ошибок (до 50 за запрос) при сбросе буфера или высокой нагрузке.
+      tags:
+        - Events Ingestion
+      security:
+        - bearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+                - events
+              properties:
+                events:
+                  type: array
+                  maxItems: 50
+                  items:
+                    $ref: '#/components/schemas/EventPayload'
+      responses:
+        '202':
+          description: Пачка событий принята
           content:
             application/json:
               schema:
@@ -30,23 +78,353 @@ paths:
                   status:
                     type: string
                     example: accepted
+                  accepted_count:
+                    type: integer
+                    example: 15
         '400':
-          description: Bad Request (Invalid JSON or missing required fields)
+          $ref: '#/components/responses/BadRequest'
         '401':
-          description: Unauthorized (Invalid or missing API key)
-        '403':
-          description: Forbidden (IP not allowed)
-        '405':
-          description: Method Not Allowed
+          $ref: '#/components/responses/Unauthorized'
+
+  # ============================================================================
+  # 2. INCIDENTS (Управление инцидентами)
+  # ============================================================================
   /api/incidents:
     get:
-      summary: List incidents
-      description: Returns the latest 100 grouped incidents for the authenticated project.
+      summary: Список инцидентов (с фильтрацией и пагинацией)
+      description: |
+        Возвращает сгруппированные инциденты проекта с возможностью фильтрации по статусу,
+        окружению, релизам, поисковому запросу и сортировке.
+      tags:
+        - Incidents
       security:
         - bearerAuth: []
+      parameters:
+        - name: status
+          in: query
+          required: false
+          description: Фильтр по статусу инцидента
+          schema:
+            type: string
+            enum: [unresolved, resolved, ignored, all]
+            default: unresolved
+        - name: q
+          in: query
+          required: false
+          description: Текстовый поиск (по сообщению, классу, файлу, URL)
+          schema:
+            type: string
+            example: DivisionByZeroError
+        - name: environment
+          in: query
+          required: false
+          description: Фильтр по окружению
+          schema:
+            type: string
+            example: production
+        - name: release
+          in: query
+          required: false
+          description: Фильтр по версии релиза
+          schema:
+            type: string
+            example: 1.2.0
+        - name: is_regression
+          in: query
+          required: false
+          description: Только инциденты, вернувшиеся после резолва (регрессии)
+          schema:
+            type: boolean
+        - name: sort
+          in: query
+          required: false
+          description: Сортировка списка
+          schema:
+            type: string
+            enum: [recent, count, first_seen]
+            default: recent
+        - name: page
+          in: query
+          required: false
+          description: Номер страницы (начиная с 1)
+          schema:
+            type: integer
+            minimum: 1
+            default: 1
+        - name: limit
+          in: query
+          required: false
+          description: Количество записей на странице
+          schema:
+            type: integer
+            minimum: 1
+            maximum: 200
+            default: 50
+        - name: include_trace
+          in: query
+          required: false
+          description: Включать ли полный StackTrace в каждый элемент списка (по умолчанию отключено для экономии трафика)
+          schema:
+            type: boolean
+            default: false
       responses:
         '200':
-          description: A list of incidents
+          description: Успешный возврат списка инцидентов
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/IncidentListResponse'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '500':
+          $ref: '#/components/responses/InternalError'
+
+  /api/incidents/{id}:
+    get:
+      summary: Детальная информация об инциденте
+      description: |
+        Возвращает полную информацию об инциденте, включая полный стектрейс,
+        отфильтрованный стектрейс приложения (без сторонних vendor фреймов) и статистику.
+      tags:
+        - Incidents
+      security:
+        - bearerAuth: []
+      parameters:
+        - $ref: '#/components/parameters/IncidentID'
+      responses:
+        '200':
+          description: Детали инцидента
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/IncidentDetail'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
+
+    delete:
+      summary: Удалить инцидент
+      description: Удаляет запись об инциденте из базы данных.
+      tags:
+        - Incidents
+      security:
+        - bearerAuth: []
+      parameters:
+        - $ref: '#/components/parameters/IncidentID'
+      responses:
+        '204':
+          description: Инцидент успешно удален
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
+
+  /api/incidents/{id}/resolve:
+    post:
+      summary: Закрыть (резолвить) инцидент
+      description: |
+        Помечает инцидент как решенный.
+        Поддерживает разные стратегии резолва:
+        - immediate: закрыть немедленно (при любом новом появлении инцидент переоткроется);
+        - next: закрыт в следующем релизе (любое появление в текущем релизе игнорируется);
+        - current: закрыт в текущем активном релизе проекта;
+        - version: закрыт в конкретной версии приложения. Появление в более старых версиях будет игнорироваться, в равной или более свежей версии — вызовет регрессию.
+      tags:
+        - Incidents Lifecycle
+      security:
+        - bearerAuth: []
+      parameters:
+        - $ref: '#/components/parameters/IncidentID'
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ResolveRequest'
+      responses:
+        '200':
+          description: Инцидент успешно закрыт
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Incident'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
+
+  /api/incidents/{id}/reopen:
+    post:
+      summary: Переоткрыть инцидент
+      description: Переводит ранее закрытый или проигнорированный инцидент обратно в статус 'unresolved'.
+      tags:
+        - Incidents Lifecycle
+      security:
+        - bearerAuth: []
+      parameters:
+        - $ref: '#/components/parameters/IncidentID'
+      responses:
+        '200':
+          description: Инцидент успешно переоткрыт
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Incident'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
+
+  /api/incidents/{id}/ignore:
+    post:
+      summary: Игнорировать / Заглушить инцидент
+      description: Переводит инцидент в статус 'ignored', отключая отправку алертов в Telegram.
+      tags:
+        - Incidents Lifecycle
+      security:
+        - bearerAuth: []
+      parameters:
+        - $ref: '#/components/parameters/IncidentID'
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                ignored:
+                  type: boolean
+                  default: true
+      responses:
+        '200':
+          description: Статус игнорирования обновлен
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Incident'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
+
+  /api/incidents/batch:
+    post:
+      summary: Массовые операции над инцидентами
+      description: Позволяет закрыть, переоткрыть, заглушить или удалить сразу несколько инцидентов по их ID.
+      tags:
+        - Incidents Lifecycle
+      security:
+        - bearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/BatchIncidentsRequest'
+      responses:
+        '200':
+          description: Операция выполнена
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  affected:
+                    type: integer
+                    example: 5
+                  action:
+                    type: string
+                    example: resolve
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+
+  # ============================================================================
+  # 3. RELEASES (Релизы и Деплои)
+  # ============================================================================
+  /api/releases:
+    get:
+      summary: Список релизов проекта
+      description: Возвращает историю версий и деплоев проекта с количеством зарегистрированных в них ошибок.
+      tags:
+        - Releases
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: limit
+          in: query
+          required: false
+          schema:
+            type: integer
+            default: 20
+      responses:
+        '200':
+          description: Список релизов
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/ReleaseSummary'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+
+    post:
+      summary: Зарегистрировать новый релиз (CI/CD Deploy hook)
+      description: |
+        Используется в пайплайнах сборки/деплоя (GitHub Actions, GitLab CI, Bitbucket)
+        для уведомления LaraSentry о выкатке новой версии.
+      tags:
+        - Releases
+      security:
+        - bearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreateReleaseRequest'
+      responses:
+        '201':
+          description: Релиз успешно зарегистрирован
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Release'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+
+  /api/releases/{version}/incidents:
+    get:
+      summary: Список инцидентов версии
+      description: Возвращает ошибки, впервые возникшие или зафиксированные в указанной версии.
+      tags:
+        - Releases
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: version
+          in: path
+          required: true
+          description: Семантическая версия (например, 1.3.0)
+          schema:
+            type: string
+        - name: new_only
+          in: query
+          required: false
+          description: Показывать только те ошибки, которые появились впервые в этой версии
+          schema:
+            type: boolean
+            default: false
+      responses:
+        '200':
+          description: Список инцидентов релиза
           content:
             application/json:
               schema:
@@ -54,17 +432,150 @@ paths:
                 items:
                   $ref: '#/components/schemas/Incident'
         '401':
-          description: Unauthorized (Invalid or missing API key)
-        '405':
-          description: Method Not Allowed
-        '500':
-          description: Internal Server Error
+          $ref: '#/components/responses/Unauthorized'
+
+  # ============================================================================
+  # 4. ANALYTICS & STATS (Метрики и Аналитика)
+  # ============================================================================
+  /api/stats/summary:
+    get:
+      summary: Сводная статистика проекта
+      description: Общие счетчики инцидентов, открытых багов, регрессий и активности за последние 24 часа.
+      tags:
+        - Analytics
+      security:
+        - bearerAuth: []
+      responses:
+        '200':
+          description: Статистика инцидентов
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/StatsSummary'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+
+  # ============================================================================
+  # 5. REALTIME STREAMING & SYSTEM
+  # ============================================================================
+  /api/events/stream:
+    get:
+      summary: Real-time поток событий (Server-Sent Events)
+      description: |
+        Потоковая передача новых входящих ошибок и изменений статусов в формате Server-Sent Events (JSON).
+        Подходит для интеграции с внешними CLI утилитами, кастомными дашбордами и ботами.
+      tags:
+        - Realtime
+      security:
+        - bearerAuth: []
+      responses:
+        '200':
+          description: Поток Server-Sent Events (SSE)
+          content:
+            text/event-stream:
+              schema:
+                type: string
+                example: |
+                  event: incident_new
+                  data: {"id":42,"hash":"abc123","exception_class":"RuntimeException","message":"Connection timed out"}
+
+                  event: regression
+                  data: {"id":15,"hash":"def456","last_release":"1.4.0","message":"Undefined array key 'user'"}
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+
+  /api/health:
+    get:
+      summary: Проверка работоспособности (Health Check)
+      description: Используется для Docker / Kubernetes health probe (liveness/readiness).
+      tags:
+        - System
+      responses:
+        '200':
+          description: Сервер здоров и готов обрабатывать запросы
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HealthStatus'
+        '503':
+          description: Сервер испытывает проблемы (например, недоступна база данных)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HealthStatus'
+
+# ==============================================================================
+# COMPONENTS (Схемы, Параметры, Ответы)
+# ==============================================================================
 components:
   securitySchemes:
     bearerAuth:
       type: http
       scheme: bearer
+      description: Bearer токен проекта (API Key)
+
+  parameters:
+    IncidentID:
+      name: id
+      in: path
+      required: true
+      description: Числовой идентификатор инцидента
+      schema:
+        type: integer
+        format: int64
+        example: 42
+
+  responses:
+    BadRequest:
+      description: Некорректный запрос (невалидный JSON или синтаксис)
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorResponse'
+    Unauthorized:
+      description: Ошибка авторизации (отсутствует или недействителен Bearer API Key)
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorResponse'
+    Forbidden:
+      description: Доступ запрещен (IP-адрес клиента не входит в белый список ALLOWED_IPS)
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorResponse'
+    NotFound:
+      description: Ресурс не найден
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorResponse'
+    UnprocessableEntity:
+      description: Ошибка валидации бизнес-правил
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorResponse'
+    InternalError:
+      description: Внутренняя ошибка сервера
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorResponse'
+
   schemas:
+    ErrorResponse:
+      type: object
+      required:
+        - error
+      properties:
+        error:
+          type: string
+          example: Invalid API Key
+        details:
+          type: string
+          example: Authorization header must start with Bearer
+
     EventPayload:
       type: object
       required:
@@ -73,76 +584,353 @@ components:
       properties:
         exception_class:
           type: string
-          description: The class name of the exception
-          example: InvalidArgumentException
+          description: Полное имя класса исключения в PHP/Laravel
+          example: Illuminate\Database\QueryException
         message:
           type: string
-          description: The error message
-          example: Invalid argument provided
+          description: Текст сообщения об ошибке
+          example: SQLSTATE[HY000] [2002] Connection refused
         file:
           type: string
-          description: File where the error occurred
-          example: /app/Http/Controllers/UserController.php
+          description: Файл, в котором возникла ошибка
+          example: /var/www/app/Http/Controllers/OrderController.php
         line:
           type: integer
-          description: Line number of the error
-          example: 42
+          description: Номер строки
+          example: 87
         stack_trace:
           type: string
-          description: Full stack trace
+          description: Полный стектрейс исключения
+          example: "#0 /var/www/app/Http/Controllers/OrderController.php(87): DB::table('orders')->get()..."
+        release:
+          type: string
+          description: Текущая версия приложения (из config/app.php или .env)
+          example: 1.4.2
+        environment:
+          type: string
+          description: Окружение приложения
+          example: production
+          default: production
         app_url:
           type: string
-          description: Application URL
-          example: https://example.com
+          description: Базовый URL приложения
+          example: https://shop.example.com
         request_url:
           type: string
-          description: The URL that triggered the error
-          example: https://example.com/api/users
+          description: Конкретный URL, вызвавший исключение
+          example: https://shop.example.com/api/v1/orders/checkout
         request_method:
           type: string
-          description: HTTP method used
+          description: HTTP-метод запроса
           example: POST
+        level:
+          type: string
+          enum: [critical, error, warning, info]
+          default: error
+          description: Уровень критичности события
+        user:
+          type: object
+          description: Данные об авторизованном пользователе на момент сбоя
+          properties:
+            id:
+              type: string
+              example: "1054"
+            email:
+              type: string
+              example: user@example.com
+            ip_address:
+              type: string
+              example: 198.51.100.42
+        tags:
+          type: object
+          additionalProperties:
+            type: string
+          description: Произвольные пользовательские теги
+          example:
+            queue: orders
+            job: ProcessOrderJob
+        fingerprint:
+          type: array
+          items:
+            type: string
+          description: Кастомные параметры для вычисления хеша группировки
+
+    EventAcceptedResponse:
+      type: object
+      required:
+        - status
+        - event_id
+      properties:
+        status:
+          type: string
+          example: accepted
+        event_id:
+          type: string
+          format: uuid
+          example: 9b1deb4d-3b7d-4bad-9bdd-2b0d7b3dcb6d
+        hash:
+          type: string
+          description: Хеш группировки инцидента (MD5)
+          example: e99a18c428cb38d5f260853678922e03
+
     Incident:
       type: object
-      description: Note that fields are capitalized in JSON as per the Go struct defaults without json tags.
       properties:
-        ID:
+        id:
+          type: integer
+          format: int64
+          example: 42
+        project_id:
           type: integer
           format: int64
           example: 1
-        ProjectID:
+        project_name:
+          type: string
+          example: Billing Microservice
+        hash:
+          type: string
+          example: e99a18c428cb38d5f260853678922e03
+        exception_class:
+          type: string
+          example: Illuminate\Database\QueryException
+        message:
+          type: string
+          example: SQLSTATE[HY000] [2002] Connection refused
+        file:
+          type: string
+          example: /var/www/app/Http/Controllers/OrderController.php
+        line:
+          type: integer
+          example: 87
+        app_url:
+          type: string
+          example: https://shop.example.com
+        request_url:
+          type: string
+          example: https://shop.example.com/api/v1/orders/checkout
+        events_count:
+          type: integer
+          example: 34
+        first_seen_at:
+          type: string
+          format: date-time
+          example: "2026-10-10T14:20:00Z"
+        last_seen_at:
+          type: string
+          format: date-time
+          example: "2026-10-11T12:05:30Z"
+        environment:
+          type: string
+          example: production
+        first_release:
+          type: string
+          example: 1.3.9
+        last_release:
+          type: string
+          example: 1.4.2
+        status:
+          type: string
+          enum: [unresolved, resolved, ignored]
+          example: unresolved
+        resolved_in_release:
+          type: string
+          example: 1.4.1
+        resolved_at:
+          type: string
+          format: date-time
+          nullable: true
+        is_regression:
+          type: boolean
+          example: false
+
+    IncidentDetail:
+      allOf:
+        - $ref: '#/components/schemas/Incident'
+        - type: object
+          properties:
+            stack_trace:
+              type: string
+              description: Полный необработанный стектрейс
+            app_stack_trace:
+              type: string
+              description: Очищенный стектрейс (только фреймы кода приложения, без vendor/third-party)
+            stack_trace_stats:
+              type: object
+              properties:
+                total_frames:
+                  type: integer
+                  example: 24
+                app_frames:
+                  type: integer
+                  example: 3
+
+    IncidentListResponse:
+      type: object
+      required:
+        - items
+        - meta
+      properties:
+        items:
+          type: array
+          items:
+            $ref: '#/components/schemas/Incident'
+        meta:
+          type: object
+          required:
+            - total
+            - page
+            - limit
+            - total_pages
+          properties:
+            total:
+              type: integer
+              example: 125
+            page:
+              type: integer
+              example: 1
+            limit:
+              type: integer
+              example: 50
+            total_pages:
+              type: integer
+              example: 3
+
+    ResolveRequest:
+      type: object
+      properties:
+        type:
+          type: string
+          enum: [immediate, next, current, version]
+          default: immediate
+          description: Стратегия резолва
+          example: next
+        version:
+          type: string
+          description: Целевая версия (обязательна, если type=version)
+          example: 1.4.3
+
+    BatchIncidentsRequest:
+      type: object
+      required:
+        - action
+        - ids
+      properties:
+        action:
+          type: string
+          enum: [resolve, reopen, ignore, delete]
+          example: resolve
+        ids:
+          type: array
+          items:
+            type: integer
+            format: int64
+          example: [12, 15, 23]
+        params:
+          type: object
+          description: Дополнительные параметры (например, для действия resolve)
+          properties:
+            type:
+              type: string
+              enum: [immediate, next, current, version]
+            version:
+              type: string
+
+    Release:
+      type: object
+      properties:
+        id:
           type: integer
           format: int64
-          example: 123
-        Hash:
-          type: string
-          example: a1b2c3d4e5f6
-        ExceptionClass:
-          type: string
-          example: InvalidArgumentException
-        Message:
-          type: string
-          example: Invalid argument provided
-        File:
-          type: string
-          example: /app/Http/Controllers/UserController.php
-        Line:
-          type: integer
-          example: 42
-        StackTrace:
-          type: string
-        AppURL:
-          type: string
-          example: https://example.com
-        RequestURL:
-          type: string
-          example: https://example.com/api/users
-        EventsCount:
-          type: integer
           example: 5
-        FirstSeenAt:
+        project_id:
+          type: integer
+          format: int64
+          example: 1
+        version:
+          type: string
+          example: 1.4.2
+        created_at:
           type: string
           format: date-time
-        LastSeenAt:
+          example: "2026-10-10T10:00:00Z"
+
+    ReleaseSummary:
+      allOf:
+        - $ref: '#/components/schemas/Release'
+        - type: object
+          properties:
+            total_incidents:
+              type: integer
+              example: 18
+            new_incidents:
+              type: integer
+              example: 3
+            regressions_count:
+              type: integer
+              example: 1
+
+    CreateReleaseRequest:
+      type: object
+      required:
+        - version
+      properties:
+        version:
           type: string
-          format: date-time
+          description: Версия приложения (SemVer)
+          example: 1.4.3
+        ref:
+          type: string
+          description: Ветка или git tag
+          example: refs/heads/main
+        commit:
+          type: string
+          description: SHA-1 коммита
+          example: 7bf81204d80a187e8349257e804f323e1f579124
+
+    StatsSummary:
+      type: object
+      properties:
+        total_incidents:
+          type: integer
+          example: 142
+        unresolved:
+          type: integer
+          example: 14
+        resolved:
+          type: integer
+          example: 121
+        ignored:
+          type: integer
+          example: 7
+        regressions:
+          type: integer
+          example: 2
+        events_last_24h:
+          type: integer
+          example: 3850
+        active_releases_count:
+          type: integer
+          example: 4
+
+    HealthStatus:
+      type: object
+      required:
+        - status
+        - database
+        - uptime
+      properties:
+        status:
+          type: string
+          enum: [ok, degraded, error]
+          example: ok
+        database:
+          type: string
+          enum: [healthy, unreachable]
+          example: healthy
+        queue_size:
+          type: integer
+          description: Текущее число событий в канале обработки в памяти
+          example: 12
+        uptime:
+          type: string
+          example: 48h22m15s
