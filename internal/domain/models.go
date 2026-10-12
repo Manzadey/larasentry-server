@@ -2,6 +2,7 @@ package domain
 
 import (
 	"context"
+	"errors"
 	"time"
 )
 
@@ -150,6 +151,21 @@ type Project struct {
 	GitHubToken  string `json:"github_token,omitempty"`
 	GitHubBranch string `json:"github_branch,omitempty"`
 	PathPrefix   string `json:"path_prefix,omitempty"`
+}
+
+var ErrGitHubRepoNotSelected = errors.New("Репозиторий не найден среди выбранных")
+
+// GitHubAccount — аккаунт GitHub, подключённый по Personal Access Token.
+type GitHubAccount struct {
+	ID            int64
+	Name          string
+	Login         string
+	Token         string `json:"-"`
+	ImportAll     bool
+	SyncedAt      *time.Time
+	SyncError     string
+	ReposTotal    int
+	ReposSelected int
 }
 
 // GitHubRepo — репозиторий из кэша github_repos.
@@ -313,6 +329,20 @@ type ProjectRepository interface {
 	GetByID(ctx context.Context, id int64) (*Project, error)
 	GetAllProjects(ctx context.Context) ([]Project, error)
 	UpdateGitHubSettings(ctx context.Context, id int64, repo, token, branch, pathPrefix string) error
+}
+
+type GitHubAccountRepository interface {
+	Create(ctx context.Context, name, token string) (int64, error)
+	Get(ctx context.Context, id int64) (*GitHubAccount, error)
+	List(ctx context.Context) ([]GitHubAccount, error)
+	// Delete отвязывает проекты от репозиториев аккаунта, затем удаляет репозитории и аккаунт.
+	Delete(ctx context.Context, id int64) error
+	ListRepos(ctx context.Context, accountID int64) ([]GitHubRepo, error)
+	ListSelectedRepos(ctx context.Context) ([]GitHubRepo, error)
+	// ApplySync приводит кэш к списку repos: новые получают selected = import_all, пропавшие удаляются.
+	ApplySync(ctx context.Context, accountID int64, login string, repos []GitHubRepo) error
+	SetSyncError(ctx context.Context, accountID int64, msg string) error
+	SetSelection(ctx context.Context, accountID int64, importAll bool, selectedIDs []int64) error
 }
 
 // ReleaseRepository describes operations for releases

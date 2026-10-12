@@ -37,7 +37,8 @@ func InitDB(dbPath string) (*sql.DB, error) {
 		github_repo TEXT,
 		github_token TEXT,
 		github_branch TEXT DEFAULT 'main',
-		path_prefix TEXT
+		path_prefix TEXT,
+		github_repo_id INTEGER
 	);
 
 	CREATE TABLE IF NOT EXISTS releases (
@@ -83,6 +84,26 @@ func InitDB(dbPath string) (*sql.DB, error) {
 		queue_context TEXT,
 		breadcrumbs TEXT,
 		FOREIGN KEY(project_id) REFERENCES projects(id)
+	);
+
+	CREATE TABLE IF NOT EXISTS github_accounts (
+		id INTEGER PRIMARY KEY AUTOINCREMENT,
+		name TEXT NOT NULL,
+		login TEXT NOT NULL DEFAULT '',
+		token TEXT NOT NULL,
+		import_all INTEGER NOT NULL DEFAULT 1,
+		synced_at DATETIME,
+		sync_error TEXT NOT NULL DEFAULT ''
+	);
+
+	CREATE TABLE IF NOT EXISTS github_repos (
+		id INTEGER PRIMARY KEY AUTOINCREMENT,
+		account_id INTEGER NOT NULL,
+		full_name TEXT NOT NULL,
+		default_branch TEXT NOT NULL DEFAULT 'main',
+		private INTEGER NOT NULL DEFAULT 0,
+		selected INTEGER NOT NULL DEFAULT 0,
+		UNIQUE(account_id, full_name)
 	);
 	`
 	_, err = db.Exec(createBaseSchema)
@@ -203,6 +224,7 @@ func migrateProjectsColumns(db *sql.DB) error {
 		{"github_token", "TEXT"},
 		{"github_branch", "TEXT DEFAULT 'main'"},
 		{"path_prefix", "TEXT"},
+		{"github_repo_id", "INTEGER"},
 	}
 
 	for _, col := range columnsToAdd {
