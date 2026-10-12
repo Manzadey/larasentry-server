@@ -279,6 +279,18 @@
         {{end}}
       </button>
 
+      <!-- Вкладка: Контекст приложения -->
+      <button type="button"
+              id="tab-btn-context"
+              onclick="switchDetailTab('context')"
+              class="px-3.5 py-2 text-xs font-medium rounded-lg text-slate-400 hover:text-slate-200 hover:bg-slate-800/60 border border-transparent flex items-center gap-1.5 transition">
+        <svg class="w-3.5 h-3.5 text-violet-400" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M7 7h.01M7 3h5c.512 0 1.024.195 1.414.586l7 7a2 2 0 010 2.828l-7 7a2 2 0 01-2.828 0l-7-7A1.994 1.994 0 013 12V7a4 4 0 014-4z"/></svg>
+        <span>Контекст</span>
+        {{if .Incident.AppContext}}
+        <span class="w-1.5 h-1.5 rounded-full bg-violet-400"></span>
+        {{end}}
+      </button>
+
       <!-- Вкладка 3: Запрос / Очередь -->
       <button type="button" 
               id="tab-btn-request"
@@ -525,6 +537,37 @@
         <div class="text-slate-400 font-medium">Хлебные крошки отсутствуют</div>
         <div class="text-slate-600">Крошки записываются в кольцевой буфер клиентом (SQL-запросы, внешние HTTP-вызовы, логи приложения) перед возникновением ошибки.</div>
       </div>
+      {{end}}
+    </div>
+
+    <!-- ==================== ВКЛАДКА: КОНТЕКСТ ПРИЛОЖЕНИЯ ==================== -->
+    <div id="tab-content-context" class="hidden space-y-4 text-xs">
+      {{if .Incident.AppContext}}
+        {{with .Incident.AppContext.Shared}}
+        <div class="space-y-2">
+          <span class="text-xs font-semibold uppercase tracking-wider text-slate-400">Shared (Laravel Context)</span>
+          {{if index . "_truncated"}}
+          <p class="text-amber-300">Контекст больше лимита ({{index . "_size"}} байт), обрезан на клиенте</p>
+          {{else}}
+          <pre class="bg-slate-950 border border-slate-800 rounded-xl p-3.5 overflow-x-auto font-mono text-slate-300">{{jsonPretty .}}</pre>
+          {{end}}
+        </div>
+        {{end}}
+        {{with .Incident.AppContext.Exception}}
+        <div class="space-y-2">
+          <span class="text-xs font-semibold uppercase tracking-wider text-slate-400">Exception::context()</span>
+          {{if index . "_truncated"}}
+          <p class="text-amber-300">Контекст больше лимита ({{index . "_size"}} байт), обрезан на клиенте</p>
+          {{else}}
+          <pre class="bg-slate-950 border border-slate-800 rounded-xl p-3.5 overflow-x-auto font-mono text-slate-300">{{jsonPretty .}}</pre>
+          {{end}}
+        </div>
+        {{end}}
+      {{else}}
+      <p class="text-slate-500">
+        Приложение не передало контекст.
+        <a href="https://laravel.com/docs/11.x/context" target="_blank" rel="noopener" class="text-sky-400 hover:underline">Laravel Context</a>
+      </p>
       {{end}}
     </div>
 
@@ -809,7 +852,7 @@
     <!-- Скрипт переключения вкладок -->
     <script>
       function switchDetailTab(tabName) {
-        const tabs = ['stack', 'breadcrumbs', 'request', 'system'];
+        const tabs = ['stack', 'breadcrumbs', 'context', 'request', 'system'];
         tabs.forEach(t => {
           const btn = document.getElementById('tab-btn-' + t);
           const content = document.getElementById('tab-content-' + t);
