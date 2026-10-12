@@ -1,160 +1,147 @@
-<!DOCTYPE html>
-<html lang="ru" class="dark h-full bg-slate-950 text-slate-100">
-<head>
+{{define "head"}}
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>{{block "title" .}}LaraSentry | Мониторинг логов{{end}}</title>
-  
-  <!-- Tailwind CSS CDN -->
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;600&family=IBM+Plex+Sans:wght@400;500;600&display=swap" rel="stylesheet">
   <script src="https://cdn.tailwindcss.com"></script>
   <script>
     tailwind.config = {
-      darkMode: 'class',
       theme: {
         extend: {
           colors: {
-            brand: {
-              50: '#f0fdf4',
-              500: '#22c55e',
-              600: '#16a34a',
-            },
-            surface: {
-              800: '#1e293b',
-              850: '#172033',
-              900: '#0f172a',
-              950: '#020617',
-            }
+            bg: '#0F131A', surface: '#151A23', raised: '#1C2230', line: '#252D3B',
+            text: '#E7EAF0', 'text-2': '#C2C8D4', muted: '#8D96A8', faint: '#5F687A',
+            red: '#F26B74', amber: '#F0A83A', green: '#3FC98E', blue: '#72A7FF'
           },
           fontFamily: {
-            mono: ['JetBrains Mono', 'Fira Code', 'Menlo', 'Consolas', 'monospace'],
-            sans: ['Inter', 'system-ui', 'sans-serif'],
+            sans: ['IBM Plex Sans', 'system-ui', 'sans-serif'],
+            mono: ['IBM Plex Mono', 'ui-monospace', 'monospace']
           }
         }
       }
     }
   </script>
-
-  <!-- HTMX & SSE Extension -->
   <script src="https://unpkg.com/htmx.org@1.9.12"></script>
-  <script src="https://unpkg.com/htmx-ext-sse@2.2.2/sse.js"></script>
-
   <style>
-    /* Плавные переходы и скроллбары для логов */
-    ::-webkit-scrollbar {
-      width: 8px;
-      height: 8px;
+    :root {
+      --bg: #0F131A; --surface: #151A23; --raised: #1C2230; --line: #252D3B;
+      --text: #E7EAF0; --text-2: #C2C8D4; --muted: #8D96A8; --faint: #5F687A;
+      --red: #F26B74; --amber: #F0A83A; --green: #3FC98E; --blue: #72A7FF;
+      --red-bg: rgba(242,107,116,.12); --amber-bg: rgba(240,168,58,.14);
+      --green-bg: rgba(63,201,142,.12); --blue-bg: rgba(114,167,255,.1);
+      --sans: 'IBM Plex Sans', system-ui, sans-serif; --mono: 'IBM Plex Mono', ui-monospace, monospace;
+      color-scheme: dark;
     }
-    ::-webkit-scrollbar-track {
-      background: #0f172a;
+    html, body { background: var(--bg); color: var(--text); font-family: var(--sans); font-size: 14px; -webkit-font-smoothing: antialiased; }
+    button, input, select, textarea { font-family: inherit; }
+    a { color: var(--blue); }
+    :focus-visible { outline: 2px solid var(--blue); outline-offset: 2px; }
+    ::-webkit-scrollbar { width: 8px; height: 8px; }
+    ::-webkit-scrollbar-track { background: var(--bg); }
+    ::-webkit-scrollbar-thumb { background: var(--line); border-radius: 4px; }
+    ::-webkit-scrollbar-thumb:hover { background: #36405A; }
+
+    .dd-opt, .h-btn, .h-ghost, .h-primary, .h-seg, .h-tab, .h-row, .h-frame, .h-group, .h-input, .h-link, .opt-card {
+      transition: background-color .12s ease, border-color .12s ease, color .12s ease, filter .12s ease;
     }
-    ::-webkit-scrollbar-thumb {
-      background: #334155;
-      border-radius: 4px;
+    .h-btn:hover { background: #1C2230 !important; border-color: #36405A !important; color: #E7EAF0 !important; }
+    .h-ghost:hover { background: rgba(255,255,255,.06) !important; color: #E7EAF0 !important; }
+    .h-primary:hover { filter: brightness(1.1); }
+    .h-seg:hover, .h-tab:hover { color: #E7EAF0 !important; }
+    .h-row:hover { background: rgba(255,255,255,.03) !important; }
+    .h-row:hover .h-row-title { color: #fff !important; }
+    .h-frame:hover { background: rgba(255,255,255,.04) !important; }
+    .h-group:hover { background: #1C2230 !important; color: #E7EAF0 !important; }
+    .h-input:hover { border-color: #36405A !important; }
+    .h-input:focus { border-color: #72A7FF !important; box-shadow: 0 0 0 3px rgba(114,167,255,.18); outline: none; }
+    .h-link:hover { text-decoration: underline !important; text-underline-offset: 3px; }
+    .dd-opt:hover { background: #252D3B !important; }
+    .opt-card:hover { border-color: #36405A !important; }
+
+    .mono { font-family: var(--mono); }
+    .btn {
+      display: inline-flex; align-items: center; justify-content: center; gap: 6px; white-space: nowrap;
+      padding: 6px 12px; border-radius: 6px; border: 1px solid var(--line); background: transparent;
+      color: var(--text-2); font-size: 13px; font-weight: 500; line-height: 18px; cursor: pointer; text-decoration: none;
     }
-    ::-webkit-scrollbar-thumb:hover {
-      background: #475569;
+    .btn-surface { background: var(--surface); color: var(--text); }
+    .btn-ghost { border-color: transparent; color: var(--muted); font-weight: 400; }
+    .btn-primary { border: 0; padding: 7px 12px; background: var(--green); color: #08130D; font-weight: 600; }
+    .btn-danger { border: 0; padding: 7px 12px; background: var(--red); color: #1A0709; font-weight: 600; }
+    .btn-icon { width: 32px; height: 32px; padding: 0; color: var(--muted); }
+    .btn:disabled { opacity: .5; cursor: not-allowed; }
+
+    .backdrop { position: fixed; inset: 0; z-index: 40; background: rgba(6,9,14,.62); opacity: 0; pointer-events: none; transition: opacity .2s ease; }
+    .backdrop.open { opacity: 1; pointer-events: auto; }
+    .drawer {
+      position: fixed; top: 0; right: 0; bottom: 0; z-index: 50; width: 800px; max-width: calc(100% - 48px);
+      background: var(--bg); border-left: 1px solid var(--line); display: flex; flex-direction: column;
+      transform: translateX(100%); visibility: hidden; transition: transform .24s cubic-bezier(.2,.8,.2,1), visibility 0s linear .24s;
     }
-    .htmx-indicator {
-      display: none;
-    }
-    .htmx-request .htmx-indicator,
-    .htmx-request.htmx-indicator {
-      display: inline-flex;
-    }
-    /* Подсветка новой строки при SSE swap */
-    @keyframes highlightRow {
-      0% { background-color: rgba(239, 68, 68, 0.25); }
-      100% { background-color: transparent; }
-    }
-    .row-highlight {
-      animation: highlightRow 2.5s ease-out;
+    .drawer.open { transform: none; visibility: visible; transition: transform .24s cubic-bezier(.2,.8,.2,1); }
+    @media (max-width: 600px) { .drawer { width: 100%; max-width: 100%; border-left: 0; } }
+
+    @media (prefers-reduced-motion: reduce) {
+      *, *::before, *::after { transition: none !important; animation-duration: 1ms !important; animation-iteration-count: 1 !important; }
     }
   </style>
+{{end}}
+<!DOCTYPE html>
+<html lang="ru" class="h-full">
+<head>
+  {{template "head" .}}
+  <title>{{block "title" .}}LaraSentry — инциденты{{end}}</title>
+  <script src="https://unpkg.com/htmx-ext-sse@2.2.2/sse.js"></script>
+  <style>
+    .htmx-indicator { display: none; }
+    .htmx-request .htmx-indicator, .htmx-request.htmx-indicator { display: inline-flex; }
+    @keyframes highlightRow { from { background-color: rgba(114,167,255,.12); } to { background-color: transparent; } }
+    .row-highlight { animation: highlightRow 2.5s ease-out; }
+    .toast { position: fixed; right: 20px; bottom: 20px; z-index: 60; display: flex; align-items: center; gap: 8px; padding: 10px 14px;
+      border-radius: 8px; border: 1px solid var(--line); background: var(--raised); color: var(--text); font-size: 13px;
+      box-shadow: 0 12px 32px rgba(0,0,0,.45); opacity: 0; transform: translateY(12px); pointer-events: none; transition: opacity .2s ease, transform .2s ease; }
+    .toast.show { opacity: 1; transform: none; }
+  </style>
 </head>
-<body class="h-full flex flex-col font-sans antialiased overflow-hidden">
-  <!-- Верхний Navbar -->
-  <header class="h-14 border-b border-slate-800 bg-slate-900/80 backdrop-blur-md px-4 flex items-center justify-between z-30 shrink-0">
-    <div class="flex items-center space-x-3">
-      <!-- Логотип -->
-      <div class="w-8 h-8 rounded-lg bg-gradient-to-tr from-rose-600 to-amber-500 flex items-center justify-center shadow-lg shadow-rose-900/30">
-        <svg class="w-5 h-5 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 10V3L4 14h7v7l9-11h-7z" />
-        </svg>
-      </div>
-      <div>
-        <span class="font-bold tracking-tight text-white flex items-center gap-2">
-          LaraSentry
-          <span class="text-[10px] uppercase font-mono px-1.5 py-0.5 rounded bg-slate-800 text-slate-400 border border-slate-700/60">Server UI</span>
-        </span>
-      </div>
-    </div>
-
-    <!-- Правые элементы управления -->
-    <div class="flex items-center space-x-3">
-      <!-- Индикатор Realtime / Пауза -->
-      <button id="live-toggle-btn"
-              onclick="toggleLiveStream()"
-              type="button"
-              class="flex items-center space-x-2 px-2.5 py-1.5 rounded-lg text-xs font-medium border border-slate-700/70 bg-slate-800/80 hover:bg-slate-700/80 transition-colors">
-        <span id="live-dot" class="w-2 h-2 rounded-full bg-emerald-500 animate-pulse"></span>
-        <span id="live-status-text" class="text-emerald-400 font-mono">LIVE ON</span>
-        <span class="text-slate-500 text-[10px]">(click to pause)</span>
+<body class="h-full flex flex-col overflow-hidden">
+  <header class="shrink-0 min-h-[56px] px-5 py-2.5 border-b border-line flex items-center justify-between gap-x-4 gap-y-2 flex-wrap">
+    <a href="/ui" class="flex items-center gap-2.5 no-underline text-text">
+      <span class="w-7 h-7 rounded-md bg-red flex items-center justify-center">
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#0F131A" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M13 10V3L4 14h7v7l9-11h-7z"/></svg>
+      </span>
+      <span class="text-base font-semibold tracking-tight">LaraSentry</span>
+    </a>
+    <nav aria-label="Основное меню" class="flex items-center gap-2 flex-wrap">
+      <button id="live-toggle-btn" type="button" class="btn h-btn" onclick="toggleLiveStream()" aria-pressed="true">
+        <span id="live-dot" class="w-2 h-2 rounded-full" style="background: var(--green)"></span>
+        <span id="live-status-text">Обновляется в реальном времени</span>
       </button>
-
-      <!-- Бейдж буфера событий во время паузы -->
       <div id="paused-counter-pill" class="hidden">
-        <button onclick="flushPausedStream()" 
-                class="px-2.5 py-1.5 rounded-lg text-xs font-semibold bg-amber-500/10 text-amber-300 border border-amber-500/30 hover:bg-amber-500/20 transition-all flex items-center gap-1.5">
-          <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"></path></svg>
-          <span id="paused-count">0</span> новых логов
+        <button type="button" class="btn h-btn" onclick="flushPausedStream()" style="color: var(--amber)">
+          <span id="paused-count">0</span> новых
         </button>
       </div>
-
-      <!-- GitHub Настройки Репозиториев -->
-      <button onclick="openGitHubModal()" 
-              type="button" 
-              class="text-xs text-slate-300 hover:text-white px-2.5 py-1.5 rounded-lg hover:bg-slate-800 transition flex items-center gap-1.5 border border-slate-700/60 bg-slate-800/40"
-              title="Настройки интеграции с GitHub">
-        <svg class="w-3.5 h-3.5 text-white" fill="currentColor" viewBox="0 0 24 24">
-          <path fill-rule="evenodd" clip-rule="evenodd" d="M12 2C6.477 2 2 6.484 2 12.017c0 4.425 2.865 8.18 6.839 9.504.5.092.682-.217.682-.483 0-.237-.008-.868-.013-1.703-2.782.605-3.369-1.343-3.369-1.343-.454-1.158-1.11-1.466-1.11-1.466-.908-.62.069-.608.069-.608 1.003.07 1.53 1.032 1.53 1.032.892 1.53 2.341 1.088 2.91.832.092-.647.35-1.088.636-1.338-2.22-.253-4.555-1.113-4.555-4.951 0-1.093.39-1.988 1.029-2.688-.103-.253-.446-1.272.098-2.65 0 0 .84-.27 2.75 1.026A9.564 9.564 0 0112 6.844c.85.004 1.705.115 2.504.337 1.909-1.296 2.747-1.027 2.747-1.027.546 1.379.202 2.398.1 2.651.64.7 1.028 1.595 1.028 2.688 0 3.848-2.339 4.695-4.566 4.943.359.309.678.92.678 1.855 0 1.338-.012 2.419-.012 2.747 0 .268.18.58.688.482A10.019 10.019 0 0022 12.017C22 6.484 17.522 2 12 2z"/>
-        </svg>
-        <span>GitHub</span>
+      <button type="button" class="btn h-btn" onclick="openGitHubModal()" aria-haspopup="dialog">
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path fill-rule="evenodd" clip-rule="evenodd" d="M12 2C6.477 2 2 6.484 2 12.017c0 4.425 2.865 8.18 6.839 9.504.5.092.682-.217.682-.483 0-.237-.008-.868-.013-1.703-2.782.605-3.369-1.343-3.369-1.343-.454-1.158-1.11-1.466-1.11-1.466-.908-.62.069-.608.069-.608 1.003.07 1.53 1.032 1.53 1.032.892 1.53 2.341 1.088 2.91.832.092-.647.35-1.088.636-1.338-2.22-.253-4.555-1.113-4.555-4.951 0-1.093.39-1.988 1.029-2.688-.103-.253-.446-1.272.098-2.65 0 0 .84-.27 2.75 1.026A9.564 9.564 0 0112 6.844c.85.004 1.705.115 2.504.337 1.909-1.296 2.747-1.027 2.747-1.027.546 1.379.202 2.398.1 2.651.64.7 1.028 1.595 1.028 2.688 0 3.848-2.339 4.695-4.566 4.943.359.309.678.92.678 1.855 0 1.338-.012 2.419-.012 2.747 0 .268.18.58.688.482A10.019 10.019 0 0022 12.017C22 6.484 17.522 2 12 2z"/></svg>Репозиторий
       </button>
-
-      <a href="/ui/github" class="text-xs text-slate-400 hover:text-slate-200 px-2 py-1 rounded hover:bg-slate-800 transition">
-        Аккаунты GitHub
-      </a>
-
-      <!-- Документация / Swagger ссылка -->
-      <a href="/swagger/" target="_blank" class="text-xs text-slate-400 hover:text-slate-200 px-2 py-1 rounded hover:bg-slate-800 transition">
-        Swagger
-      </a>
-    </div>
+      <a href="/ui/github" class="btn btn-ghost h-ghost">Аккаунты GitHub</a>
+      <a href="/swagger/" target="_blank" rel="noopener" class="btn btn-ghost h-ghost">API</a>
+    </nav>
   </header>
 
-  <!-- Основной контент страницы -->
   <main class="flex-1 flex overflow-hidden relative">
     {{template "content" .}}
   </main>
 
-  <!-- Боковая шторка (Drawer) деталей ошибки -->
-  <div id="detail-drawer" 
-       class="fixed inset-y-0 right-0 w-full sm:w-[650px] lg:w-[800px] bg-slate-900 border-l border-slate-800 shadow-2xl z-50 transform translate-x-full transition-transform duration-300 ease-in-out flex flex-col">
-    <!-- Сюда HTMX загружает частичный шаблон incident_detail.html -->
-    <div id="detail-panel-content" class="h-full flex flex-col">
-      <div class="p-6 text-slate-400 text-sm">Выберите инцидент для детального просмотра</div>
-    </div>
-  </div>
+  <div id="drawer-backdrop" class="backdrop" onclick="closeDrawer()"></div>
+  <aside id="detail-drawer" class="drawer" aria-label="Детали ошибки">
+    <div id="detail-panel-content" class="h-full flex flex-col"></div>
+  </aside>
 
-  <!-- Затемнение фона (Backdrop) для шторки -->
-  <div id="drawer-backdrop" 
-       onclick="closeDrawer()" 
-       class="fixed inset-0 bg-black/60 backdrop-blur-xs z-40 hidden transition-opacity"></div>
-
-  <!-- Всплывающий тост для копирования и уведомлений -->
-  <div id="toast" class="fixed bottom-5 right-5 z-50 transform translate-y-16 opacity-0 transition-all duration-300 bg-slate-800 text-slate-200 border border-slate-700 px-4 py-2.5 rounded-xl shadow-xl flex items-center space-x-2 text-sm">
-    <svg class="w-4 h-4 text-emerald-400" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7"></path></svg>
-    <span id="toast-message">Скопировано в буфер</span>
+  <div id="toast" class="toast" role="status" aria-live="polite">
+    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="var(--green)" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M5 13l4 4L19 7"/></svg>
+    <span id="toast-message"></span>
   </div>
 
   <!-- Модальное окно настроек GitHub -->
@@ -222,83 +209,64 @@
     </div>
   </div>
 
-  <!-- Базовые клиентские скрипты (шторка, пауза, горячие клавиши) -->
   <script>
     let isLiveActive = true;
     let pausedQueue = [];
 
     function openDrawer() {
-      document.getElementById('detail-drawer').classList.remove('translate-x-full');
-      document.getElementById('drawer-backdrop').classList.remove('hidden');
+      document.getElementById('detail-drawer').classList.add('open');
+      document.getElementById('drawer-backdrop').classList.add('open');
     }
 
     function closeDrawer() {
-      document.getElementById('detail-drawer').classList.add('translate-x-full');
-      document.getElementById('drawer-backdrop').classList.add('hidden');
+      document.getElementById('detail-drawer').classList.remove('open');
+      document.getElementById('drawer-backdrop').classList.remove('open');
+    }
+
+    function isDrawerOpen() {
+      return document.getElementById('detail-drawer').classList.contains('open');
     }
 
     function toggleLiveStream() {
       isLiveActive = !isLiveActive;
-      const dot = document.getElementById('live-dot');
-      const text = document.getElementById('live-status-text');
       const btn = document.getElementById('live-toggle-btn');
-      const pausedPill = document.getElementById('paused-counter-pill');
-
-      if (isLiveActive) {
-        dot.className = 'w-2 h-2 rounded-full bg-emerald-500 animate-pulse';
-        text.className = 'text-emerald-400 font-mono';
-        text.textContent = 'LIVE ON';
-        pausedPill.classList.add('hidden');
-        flushPausedStream();
-        showToast('Realtime стриминг возобновлен');
-      } else {
-        dot.className = 'w-2 h-2 rounded-full bg-amber-500';
-        text.className = 'text-amber-400 font-mono';
-        text.textContent = 'PAUSED';
-        showToast('Realtime стриминг на паузе');
-      }
+      btn.setAttribute('aria-pressed', String(isLiveActive));
+      document.getElementById('live-dot').style.background = isLiveActive ? 'var(--green)' : 'var(--amber)';
+      document.getElementById('live-status-text').textContent = isLiveActive ? 'Обновляется в реальном времени' : 'Обновления на паузе';
+      btn.style.color = isLiveActive ? '' : 'var(--amber)';
+      if (isLiveActive) flushPausedStream();
     }
 
     function flushPausedStream() {
-      if (pausedQueue.length > 0) {
-        const tbody = document.getElementById('incidents-table-body');
-        while (pausedQueue.length > 0) {
-          const itemHtml = pausedQueue.shift();
-          tbody.insertAdjacentHTML('afterbegin', itemHtml);
-        }
+      const tbody = document.getElementById('incidents-table-body');
+      while (pausedQueue.length > 0) {
+        tbody.insertAdjacentHTML('afterbegin', pausedQueue.shift());
       }
       document.getElementById('paused-counter-pill').classList.add('hidden');
       document.getElementById('paused-count').textContent = '0';
     }
 
-    // Перехват SSE события перед вставкой в DOM для обработки паузы
     document.addEventListener('htmx:sseBeforeMessage', function(evt) {
       if (!isLiveActive) {
         evt.preventDefault();
         pausedQueue.push(evt.detail.data);
-        const pill = document.getElementById('paused-counter-pill');
-        pill.classList.remove('hidden');
+        document.getElementById('paused-counter-pill').classList.remove('hidden');
         document.getElementById('paused-count').textContent = pausedQueue.length;
       }
     });
 
-    // Показ тоста
     function showToast(message) {
       const toast = document.getElementById('toast');
-      const msg = document.getElementById('toast-message');
-      msg.textContent = message;
-      toast.classList.remove('translate-y-16', 'opacity-0');
-      setTimeout(() => {
-        toast.classList.add('translate-y-16', 'opacity-0');
-      }, 2500);
+      document.getElementById('toast-message').textContent = message;
+      toast.classList.add('show');
+      clearTimeout(showToast.timer);
+      showToast.timer = setTimeout(() => toast.classList.remove('show'), 2500);
     }
 
-    // Копирование в буфер
-    function copyText(text, successMsg = 'Скопировано!') {
-      navigator.clipboard.writeText(text).then(() => {
-        showToast(successMsg);
-      }).catch(err => {
+    function copyText(text, successMsg = 'Скопировано') {
+      navigator.clipboard.writeText(text).then(() => showToast(successMsg)).catch(err => {
         console.error('Ошибка копирования:', err);
+        showToast('Не удалось скопировать');
       });
     }
 
@@ -411,7 +379,6 @@
       if (branch && branchInput) branchInput.value = branch;
     }
 
-    // Слушатель HTMX после подгрузки содержимого шторки
     document.addEventListener('htmx:afterSwap', function(evt) {
       if (evt.detail.target && evt.detail.target.id === 'detail-panel-content') {
         initStackTraceFilter();
@@ -421,22 +388,24 @@
       }
     });
 
-    // Горячие клавиши
+    function isTypingTarget(el) {
+      return el && (el.isContentEditable || ['INPUT', 'TEXTAREA', 'SELECT'].includes(el.tagName));
+    }
+
     document.addEventListener('keydown', function(e) {
-      // Escape закрывает модалку GitHub или шторку
       if (e.key === 'Escape') {
         const ghModal = document.getElementById('github-modal');
         if (ghModal && !ghModal.classList.contains('hidden')) {
           closeGitHubModal();
-        } else {
+        } else if (isDrawerOpen()) {
           closeDrawer();
         }
+        return;
       }
-      // '/' фокусирует поле поиска (если фокус не в input)
-      if (e.key === '/' && document.activeElement.tagName !== 'INPUT' && document.activeElement.tagName !== 'TEXTAREA') {
-        e.preventDefault();
+      if (e.key === '/' && !isTypingTarget(document.activeElement)) {
         const searchInput = document.getElementById('search-input');
         if (searchInput) {
+          e.preventDefault();
           searchInput.focus();
           searchInput.select();
         }
