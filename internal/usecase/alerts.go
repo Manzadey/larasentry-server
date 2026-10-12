@@ -63,6 +63,9 @@ func (a *AlertManager) processAlerts(ctx context.Context) {
 		if incident.PHPVersion != "" {
 			metaParts = append(metaParts, fmt.Sprintf("🐘 PHP: `%s`", incident.PHPVersion))
 		}
+		if incident.LaravelVersion != "" {
+			metaParts = append(metaParts, fmt.Sprintf("🔴 Laravel: `%s`", incident.LaravelVersion))
+		}
 		sb.WriteString(strings.Join(metaParts, " | ") + "\n")
 		sb.WriteString(fmt.Sprintf("`%s:%d`\n", incident.File, incident.Line))
 		sb.WriteString(fmt.Sprintf("_%s_\n\n", incident.Message))

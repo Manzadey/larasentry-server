@@ -706,6 +706,10 @@ components:
           type: string
           description: Версия PHP runtime на клиенте (из константы PHP_VERSION)
           example: 8.2.18
+        laravel_version:
+          type: string
+          description: Версия фреймворка Laravel (из app()->version())
+          example: 11.28.0
         app_url:
           type: string
           description: Базовый URL приложения (APP_URL)
@@ -738,6 +742,111 @@ components:
           items:
             type: string
           description: Кастомные параметры для вычисления хеша группировки
+        route:
+          type: object
+          description: Контекст маршрута фреймворка (Laravel Route)
+          properties:
+            name:
+              type: string
+              example: orders.checkout
+            action:
+              type: string
+              example: App\Http\Controllers\OrderController@checkout
+            middleware:
+              type: array
+              items:
+                type: string
+            parameters:
+              type: object
+        http_request:
+          type: object
+          description: Расширенный контекст входящего HTTP-запроса
+          properties:
+            url:
+              type: string
+            method:
+              type: string
+            query_string:
+              type: string
+            query_params:
+              type: object
+            headers:
+              type: object
+              additionalProperties:
+                type: string
+            client_ip:
+              type: string
+            body:
+              type: object
+        execution:
+          type: object
+          description: Контекст режима выполнения (HTTP, Очереди, Artisan CLI)
+          properties:
+            type:
+              type: string
+              enum: [http, queue, console]
+            is_cli:
+              type: boolean
+            command:
+              type: string
+            queue_job:
+              type: object
+              properties:
+                job_name:
+                  type: string
+                queue:
+                  type: string
+                connection:
+                  type: string
+                attempts:
+                  type: integer
+                max_tries:
+                  type: integer
+                timeout:
+                  type: integer
+        breadcrumbs:
+          type: array
+          description: Кольцевой буфер последних событий приложения
+          items:
+            type: object
+            properties:
+              category:
+                type: string
+                enum: [sql, log, http, queue, cache]
+              level:
+                type: string
+              message:
+                type: string
+              data:
+                type: object
+              timestamp:
+                type: number
+        system:
+          type: object
+          description: Ресурсы и системное окружение
+          properties:
+            php_version:
+              type: string
+            laravel_version:
+              type: string
+            memory_usage_bytes:
+              type: integer
+            memory_peak_bytes:
+              type: integer
+            duration_ms:
+              type: number
+            hostname:
+              type: string
+            os:
+              type: string
+            sapi:
+              type: string
+            locale:
+              type: string
+            config_cached:
+              type: boolean
+            routes_cached:
+              type: boolean
 
     EventAcceptedResponse:
       type: object
@@ -837,6 +946,10 @@ components:
           type: string
           example: 8.2.18
           description: Версия PHP runtime, на которой произошел сбой
+        laravel_version:
+          type: string
+          example: 11.28.0
+          description: Версия фреймворка Laravel, на которой произошел сбой
         status:
           type: string
           enum: [unresolved, resolved, ignored]

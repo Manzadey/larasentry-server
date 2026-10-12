@@ -180,17 +180,18 @@ func TestIncident_PHPVersionPersistence(t *testing.T) {
 
 	ctx := context.Background()
 
-	// 1. Ingest event with direct PHPVersion
+	// 1. Ingest event with direct PHPVersion and LaravelVersion
 	evt1 := domain.IncomingEvent{
 		ProjectID:   1,
 		ProjectName: "Default Project",
 		ProjectKey:  "test-api-key",
 		Payload: domain.EventPayload{
 			ExceptionClass: "Error",
-			Message:        "Direct PHP version test",
+			Message:        "Direct PHP and Laravel version test",
 			File:           "app/Services/Test.php",
 			Line:           10,
 			PHPVersion:     "8.2.18",
+			LaravelVersion: "11.28.0",
 		},
 	}
 	res1, err := incRepo.UpsertIncident(ctx, evt1, "hash-php-1")
@@ -205,19 +206,23 @@ func TestIncident_PHPVersionPersistence(t *testing.T) {
 	if inc1.PHPVersion != "8.2.18" {
 		t.Errorf("expected PHPVersion 8.2.18, got %q", inc1.PHPVersion)
 	}
+	if inc1.LaravelVersion != "11.28.0" {
+		t.Errorf("expected LaravelVersion 11.28.0, got %q", inc1.LaravelVersion)
+	}
 
-	// 2. Ingest event with PHP version inside tags["php_version"]
+	// 2. Ingest event with versions inside tags
 	evt2 := domain.IncomingEvent{
 		ProjectID:   1,
 		ProjectName: "Default Project",
 		ProjectKey:  "test-api-key",
 		Payload: domain.EventPayload{
 			ExceptionClass: "Error",
-			Message:        "Tag PHP version test",
+			Message:        "Tag PHP and Laravel version test",
 			File:           "app/Services/Test2.php",
 			Line:           20,
 			Tags: map[string]string{
-				"php_version": "8.3.4",
+				"php_version":     "8.3.4",
+				"laravel_version": "10.48.2",
 			},
 		},
 	}
@@ -233,21 +238,175 @@ func TestIncident_PHPVersionPersistence(t *testing.T) {
 	if inc2.PHPVersion != "8.3.4" {
 		t.Errorf("expected PHPVersion 8.3.4 from tags, got %q", inc2.PHPVersion)
 	}
+	if inc2.LaravelVersion != "10.48.2" {
+		t.Errorf("expected LaravelVersion 10.48.2 from tags, got %q", inc2.LaravelVersion)
+	}
 
-	// 3. Test list incidents returns PHPVersion
+	// 3. Test list incidents returns PHPVersion and LaravelVersion
 	list, err := incRepo.GetIncidents(ctx, domain.IncidentFilter{Status: "all"})
 	if err != nil {
 		t.Fatalf("GetIncidents failed: %v", err)
 	}
 	found := false
 	for _, item := range list {
-		if item.ID == inc1.ID && item.PHPVersion == "8.2.18" {
+		if item.ID == inc1.ID && item.PHPVersion == "8.2.18" && item.LaravelVersion == "11.28.0" {
 			found = true
 			break
 		}
 	}
 	if !found {
-		t.Errorf("expected to find incident with PHPVersion in GetIncidents list")
+		t.Errorf("expected to find incident with PHPVersion and LaravelVersion in GetIncidents list")
 	}
 }
+
+func TestIncident_ExtendedContextPersistence(t *testing.T) {
+	incRepo, _, cleanup := setupTestDB(t)
+	defer cleanup()
+
+	ctx := context.Background()
+
+	// 1. Ingest event with full extended context
+	maxTries := 5
+	configCached := true
+	evt := domain.IncomingEvent{
+		ProjectID:   1,
+		ProjectName: "Default Project",
+		ProjectKey:  "test-api-key",
+		Payload: domain.EventPayload{
+			ExceptionClass: "OrderProcessingException",
+			Message:        "Payment gateway timed out",
+			File:           "app/Services/OrderService.php",
+			Line:           84,
+			Release:        "2.4.0",
+			Environment:    "production",
+			Route: &domain.RouteContext{
+				Name:       "orders.checkout",
+				Action:     "App\\Http\\Controllers\\OrderController@checkout",
+				Middleware: []string{"web", "auth:sanctum"},
+				Parameters: map[string]any{"cart_id": "4910"},
+			},
+			HTTPRequest: &domain.HTTPRequestContext{
+				URL:         "https://shop.example.com/checkout",
+				Method:      "POST",
+				QueryString: "promo=AUTUMN",
+				ClientIP:    "192.168.1.100",
+				Headers:     map[string]string{"user-agent": "Mozilla/5.0"},
+				Body:        map[string]any{"amount": 500, "password": "[FILTERED]"},
+			},
+			Execution: &domain.ExecutionContext{
+				Type:  "queue",
+				IsCLI: true,
+				QueueJob: &domain.QueueJobContext{
+					JobName:    "App\\Jobs\\ProcessPaymentJob",
+					Queue:      "payments-high",
+					Connection: "redis",
+					Attempts:   3,
+					MaxTries:   &maxTries,
+					Timeout:    120,
+				},
+			},
+			System: &domain.SystemContext{
+				PHPVersion:       "8.3.4",
+				LaravelVersion:   "11.28.0",
+				MemoryUsageBytes: 14680064,
+				MemoryPeakBytes:  27262976,
+				DurationMS:       312.45,
+				Hostname:         "worker-pod-1",
+				OS               : "Linux 6.1.0",
+				SAPI             : "cli",
+				ConfigCached:     &configCached,
+			},
+			Breadcrumbs: []domain.Breadcrumb{
+				{
+					Category:  "sql",
+					Level:     "info",
+					Message:   "SELECT * FROM orders WHERE id = 4910",
+					Timestamp: 1728676510.12,
+				},
+				{
+					Category:  "http",
+					Level:     "error",
+					Message:   "POST https://api.stripe.com/v1/charges [504 Gateway Timeout]",
+					Timestamp: 1728676515.34,
+				},
+			},
+		},
+	}
+
+	res, err := incRepo.UpsertIncident(ctx, evt, "hash-ext-ctx-1")
+	if err != nil {
+		t.Fatalf("UpsertIncident failed: %v", err)
+	}
+
+	inc, err := incRepo.GetIncidentByID(ctx, res.IncidentID)
+	if err != nil {
+		t.Fatalf("GetIncidentByID failed: %v", err)
+	}
+
+	// Verify denormalized fields
+	if inc.RouteName != "orders.checkout" {
+		t.Errorf("expected RouteName 'orders.checkout', got %q", inc.RouteName)
+	}
+	if inc.RouteAction != "App\\Http\\Controllers\\OrderController@checkout" {
+		t.Errorf("expected RouteAction 'App\\Http\\Controllers\\OrderController@checkout', got %q", inc.RouteAction)
+	}
+	if inc.ExecutionType != "queue" {
+		t.Errorf("expected ExecutionType 'queue', got %q", inc.ExecutionType)
+	}
+	if inc.PHPVersion != "8.3.4" {
+		t.Errorf("expected PHPVersion '8.3.4' (synced from system), got %q", inc.PHPVersion)
+	}
+	if inc.LaravelVersion != "11.28.0" {
+		t.Errorf("expected LaravelVersion '11.28.0' (synced from system), got %q", inc.LaravelVersion)
+	}
+
+	// Verify structured contexts
+	if inc.Route == nil || inc.Route.Name != "orders.checkout" {
+		t.Fatalf("expected parsed Route, got %+v", inc.Route)
+	}
+	if len(inc.Route.Middleware) != 2 || inc.Route.Middleware[1] != "auth:sanctum" {
+		t.Errorf("unexpected Route middleware: %+v", inc.Route.Middleware)
+	}
+
+	if inc.HTTPRequest == nil || inc.HTTPRequest.Method != "POST" {
+		t.Fatalf("expected parsed HTTPRequest, got %+v", inc.HTTPRequest)
+	}
+	if inc.HTTPRequest.ClientIP != "192.168.1.100" {
+		t.Errorf("expected ClientIP '192.168.1.100', got %q", inc.HTTPRequest.ClientIP)
+	}
+
+	if inc.QueueJob == nil || inc.QueueJob.JobName != "App\\Jobs\\ProcessPaymentJob" {
+		t.Fatalf("expected parsed QueueJob, got %+v", inc.QueueJob)
+	}
+	if inc.QueueJob.Attempts != 3 || inc.QueueJob.MaxTries == nil || *inc.QueueJob.MaxTries != 5 {
+		t.Errorf("unexpected QueueJob parameters: %+v", inc.QueueJob)
+	}
+
+	if inc.System == nil || inc.System.Hostname != "worker-pod-1" {
+		t.Fatalf("expected parsed SystemContext, got %+v", inc.System)
+	}
+	if inc.System.MemoryPeakBytes != 27262976 || inc.System.DurationMS != 312.45 {
+		t.Errorf("unexpected System metrics: %+v", inc.System)
+	}
+
+	if len(inc.Breadcrumbs) != 2 {
+		t.Fatalf("expected 2 breadcrumbs, got %d", len(inc.Breadcrumbs))
+	}
+	if inc.Breadcrumbs[0].Category != "sql" || inc.Breadcrumbs[1].Category != "http" {
+		t.Errorf("unexpected breadcrumbs: %+v", inc.Breadcrumbs)
+	}
+
+	// 2. Test search by route_name
+	filtered, err := incRepo.GetIncidents(ctx, domain.IncidentFilter{
+		Query:  "orders.checkout",
+		Status: "all",
+	})
+	if err != nil {
+		t.Fatalf("GetIncidents by route_name failed: %v", err)
+	}
+	if len(filtered) != 1 || filtered[0].ID != inc.ID {
+		t.Errorf("expected 1 result searching for 'orders.checkout', got %d", len(filtered))
+	}
+}
+
 

@@ -33,11 +33,76 @@ func (r *IncidentRepo) UpsertIncident(ctx context.Context, event domain.Incoming
 		incomingEnv = "production"
 	}
 	incomingPHPVer := strings.TrimSpace(event.Payload.PHPVersion)
+	if incomingPHPVer == "" && event.Payload.System != nil && event.Payload.System.PHPVersion != "" {
+		incomingPHPVer = strings.TrimSpace(event.Payload.System.PHPVersion)
+	}
 	if incomingPHPVer == "" && event.Payload.Tags != nil {
 		if v, ok := event.Payload.Tags["php_version"]; ok {
 			incomingPHPVer = strings.TrimSpace(v)
 		} else if v, ok := event.Payload.Tags["php"]; ok {
 			incomingPHPVer = strings.TrimSpace(v)
+		}
+	}
+	incomingLaravelVer := strings.TrimSpace(event.Payload.LaravelVersion)
+	if incomingLaravelVer == "" && event.Payload.System != nil && event.Payload.System.LaravelVersion != "" {
+		incomingLaravelVer = strings.TrimSpace(event.Payload.System.LaravelVersion)
+	}
+	if incomingLaravelVer == "" && event.Payload.Tags != nil {
+		if v, ok := event.Payload.Tags["laravel_version"]; ok {
+			incomingLaravelVer = strings.TrimSpace(v)
+		} else if v, ok := event.Payload.Tags["laravel"]; ok {
+			incomingLaravelVer = strings.TrimSpace(v)
+		}
+	}
+
+	var routeName, routeAction string
+	if event.Payload.Route != nil {
+		routeName = strings.TrimSpace(event.Payload.Route.Name)
+		routeAction = strings.TrimSpace(event.Payload.Route.Action)
+	}
+
+	executionType := "http"
+	if event.Payload.Execution != nil && event.Payload.Execution.Type != "" {
+		executionType = strings.TrimSpace(event.Payload.Execution.Type)
+	} else if event.Payload.Execution != nil && event.Payload.Execution.QueueJob != nil {
+		executionType = "queue"
+	}
+
+	var requestContextJSON sql.NullString
+	if event.Payload.Route != nil || event.Payload.HTTPRequest != nil {
+		reqData := domain.RequestContextData{
+			Route:       event.Payload.Route,
+			HTTPRequest: event.Payload.HTTPRequest,
+		}
+		if b, err := json.Marshal(reqData); err == nil {
+			requestContextJSON = sql.NullString{String: string(b), Valid: true}
+		}
+	}
+
+	var queueContextJSON sql.NullString
+	if event.Payload.Execution != nil && event.Payload.Execution.QueueJob != nil {
+		if b, err := json.Marshal(event.Payload.Execution.QueueJob); err == nil {
+			queueContextJSON = sql.NullString{String: string(b), Valid: true}
+		}
+	}
+
+	var systemContextJSON sql.NullString
+	if event.Payload.System != nil {
+		if event.Payload.System.PHPVersion == "" && incomingPHPVer != "" {
+			event.Payload.System.PHPVersion = incomingPHPVer
+		}
+		if event.Payload.System.LaravelVersion == "" && incomingLaravelVer != "" {
+			event.Payload.System.LaravelVersion = incomingLaravelVer
+		}
+		if b, err := json.Marshal(event.Payload.System); err == nil {
+			systemContextJSON = sql.NullString{String: string(b), Valid: true}
+		}
+	}
+
+	var breadcrumbsJSON sql.NullString
+	if len(event.Payload.Breadcrumbs) > 0 {
+		if b, err := json.Marshal(event.Payload.Breadcrumbs); err == nil {
+			breadcrumbsJSON = sql.NullString{String: string(b), Valid: true}
 		}
 	}
 
@@ -81,8 +146,10 @@ func (r *IncidentRepo) UpsertIncident(ctx context.Context, event domain.Incoming
 			project_id, hash, exception_class, message, file, line, 
 			stack_trace, app_url, request_url, events_count, first_seen_at, last_seen_at,
 			environment, first_release, last_release, status, is_regression, code_snippet,
-			php_version
-		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 1, ?, ?, ?, ?, ?, 'unresolved', 0, ?, ?)
+			php_version, laravel_version,
+			route_name, route_action, execution_type,
+			request_context, queue_context, system_context, breadcrumbs
+		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 1, ?, ?, ?, ?, ?, 'unresolved', 0, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 		RETURNING id;
 		`
 		var newID int64
@@ -90,7 +157,9 @@ func (r *IncidentRepo) UpsertIncident(ctx context.Context, event domain.Incoming
 			event.ProjectID, hash, event.Payload.ExceptionClass, event.Payload.Message,
 			event.Payload.File, event.Payload.Line, event.Payload.StackTrace,
 			event.Payload.AppURL, event.Payload.RequestURL, now, now,
-			incomingEnv, incomingRel, incomingRel, snippetJSON, incomingPHPVer,
+			incomingEnv, incomingRel, incomingRel, snippetJSON, incomingPHPVer, incomingLaravelVer,
+			routeName, routeAction, executionType,
+			requestContextJSON, queueContextJSON, systemContextJSON, breadcrumbsJSON,
 		).Scan(&newID)
 		if err != nil {
 			return nil, err
@@ -166,10 +235,32 @@ func (r *IncidentRepo) UpsertIncident(ctx context.Context, event domain.Incoming
 				status = 'unresolved',
 				is_regression = 1,
 				code_snippet = CASE WHEN ? IS NOT NULL THEN ? ELSE code_snippet END,
-				php_version = CASE WHEN ? != '' THEN ? ELSE php_version END
+				php_version = CASE WHEN ? != '' THEN ? ELSE php_version END,
+				laravel_version = CASE WHEN ? != '' THEN ? ELSE laravel_version END,
+				route_name = CASE WHEN ? != '' THEN ? ELSE route_name END,
+				route_action = CASE WHEN ? != '' THEN ? ELSE route_action END,
+				execution_type = CASE WHEN ? != '' THEN ? ELSE execution_type END,
+				request_context = CASE WHEN ? IS NOT NULL THEN ? ELSE request_context END,
+				queue_context = CASE WHEN ? IS NOT NULL THEN ? ELSE queue_context END,
+				system_context = CASE WHEN ? IS NOT NULL THEN ? ELSE system_context END,
+				breadcrumbs = CASE WHEN ? IS NOT NULL THEN ? ELSE breadcrumbs END
 			WHERE id = ?;
 			`
-			_, err = r.db.ExecContext(ctx, updateQuery, now, event.Payload.Message, incomingRel, incomingRel, snippetJSON, snippetJSON, incomingPHPVer, incomingPHPVer, existing.id)
+			_, err = r.db.ExecContext(ctx, updateQuery,
+				now, event.Payload.Message,
+				incomingRel, incomingRel,
+				snippetJSON, snippetJSON,
+				incomingPHPVer, incomingPHPVer,
+				incomingLaravelVer, incomingLaravelVer,
+				routeName, routeName,
+				routeAction, routeAction,
+				executionType, executionType,
+				requestContextJSON, requestContextJSON,
+				queueContextJSON, queueContextJSON,
+				systemContextJSON, systemContextJSON,
+				breadcrumbsJSON, breadcrumbsJSON,
+				existing.id,
+			)
 			if err != nil {
 				return nil, err
 			}
@@ -195,10 +286,18 @@ func (r *IncidentRepo) UpsertIncident(ctx context.Context, event domain.Incoming
 		UPDATE incidents SET
 			events_count = events_count + 1,
 			last_seen_at = ?,
-			php_version = CASE WHEN ? != '' THEN ? ELSE php_version END
+			php_version = CASE WHEN ? != '' THEN ? ELSE php_version END,
+			laravel_version = CASE WHEN ? != '' THEN ? ELSE laravel_version END,
+			system_context = CASE WHEN ? IS NOT NULL THEN ? ELSE system_context END
 		WHERE id = ?;
 		`
-		_, err = r.db.ExecContext(ctx, quietQuery, now, incomingPHPVer, incomingPHPVer, existing.id)
+		_, err = r.db.ExecContext(ctx, quietQuery,
+			now,
+			incomingPHPVer, incomingPHPVer,
+			incomingLaravelVer, incomingLaravelVer,
+			systemContextJSON, systemContextJSON,
+			existing.id,
+		)
 		if err != nil {
 			return nil, err
 		}
@@ -227,10 +326,32 @@ func (r *IncidentRepo) UpsertIncident(ctx context.Context, event domain.Incoming
 		message = ?,
 		last_release = CASE WHEN ? != '' THEN ? ELSE last_release END,
 		code_snippet = CASE WHEN ? IS NOT NULL THEN ? ELSE code_snippet END,
-		php_version = CASE WHEN ? != '' THEN ? ELSE php_version END
+		php_version = CASE WHEN ? != '' THEN ? ELSE php_version END,
+		laravel_version = CASE WHEN ? != '' THEN ? ELSE laravel_version END,
+		route_name = CASE WHEN ? != '' THEN ? ELSE route_name END,
+		route_action = CASE WHEN ? != '' THEN ? ELSE route_action END,
+		execution_type = CASE WHEN ? != '' THEN ? ELSE execution_type END,
+		request_context = CASE WHEN ? IS NOT NULL THEN ? ELSE request_context END,
+		queue_context = CASE WHEN ? IS NOT NULL THEN ? ELSE queue_context END,
+		system_context = CASE WHEN ? IS NOT NULL THEN ? ELSE system_context END,
+		breadcrumbs = CASE WHEN ? IS NOT NULL THEN ? ELSE breadcrumbs END
 	WHERE id = ?;
 	`
-	_, err = r.db.ExecContext(ctx, updateQuery, now, event.Payload.Message, incomingRel, incomingRel, snippetJSON, snippetJSON, incomingPHPVer, incomingPHPVer, existing.id)
+	_, err = r.db.ExecContext(ctx, updateQuery,
+		now, event.Payload.Message,
+		incomingRel, incomingRel,
+		snippetJSON, snippetJSON,
+		incomingPHPVer, incomingPHPVer,
+		incomingLaravelVer, incomingLaravelVer,
+		routeName, routeName,
+		routeAction, routeAction,
+		executionType, executionType,
+		requestContextJSON, requestContextJSON,
+		queueContextJSON, queueContextJSON,
+		systemContextJSON, systemContextJSON,
+		breadcrumbsJSON, breadcrumbsJSON,
+		existing.id,
+	)
 	if err != nil {
 		return nil, err
 	}
@@ -344,9 +465,9 @@ func buildIncidentWhere(filter domain.IncidentFilter) (string, []interface{}) {
 	}
 
 	if filter.Query != "" {
-		where += " AND (i.message LIKE ? OR i.exception_class LIKE ? OR i.file LIKE ? OR i.request_url LIKE ? OR p.name LIKE ? OR i.last_release LIKE ?)"
+		where += " AND (i.message LIKE ? OR i.exception_class LIKE ? OR i.file LIKE ? OR i.request_url LIKE ? OR p.name LIKE ? OR i.last_release LIKE ? OR i.route_name LIKE ?)"
 		pattern := "%" + filter.Query + "%"
-		args = append(args, pattern, pattern, pattern, pattern, pattern, pattern)
+		args = append(args, pattern, pattern, pattern, pattern, pattern, pattern, pattern)
 	}
 
 	return where, args
@@ -360,7 +481,8 @@ func (r *IncidentRepo) GetIncidents(ctx context.Context, filter domain.IncidentF
 			i.events_count, i.first_seen_at, i.last_seen_at,
 			i.environment, COALESCE(i.first_release, ''), COALESCE(i.last_release, ''),
 			i.status, COALESCE(i.resolved_in_release, ''), i.resolved_at, i.is_regression,
-			COALESCE(i.php_version, '')
+			COALESCE(i.php_version, ''), COALESCE(i.laravel_version, ''),
+			COALESCE(i.route_name, ''), COALESCE(i.route_action, ''), COALESCE(i.execution_type, 'http')
 		FROM incidents i
 		LEFT JOIN projects p ON i.project_id = p.id
 	`
@@ -405,7 +527,8 @@ func (r *IncidentRepo) GetIncidents(ctx context.Context, filter domain.IncidentF
 			&inc.EventsCount, &inc.FirstSeenAt, &inc.LastSeenAt,
 			&inc.Environment, &inc.FirstRelease, &inc.LastRelease,
 			&inc.Status, &inc.ResolvedInRelease, &resolvedAt, &isRegrInt,
-			&inc.PHPVersion,
+			&inc.PHPVersion, &inc.LaravelVersion,
+			&inc.RouteName, &inc.RouteAction, &inc.ExecutionType,
 		); err != nil {
 			log.Printf("Error scanning row: %v", err)
 			continue
@@ -442,7 +565,15 @@ func (r *IncidentRepo) GetIncidentByID(ctx context.Context, id int64) (*domain.I
 			i.environment, COALESCE(i.first_release, ''), COALESCE(i.last_release, ''),
 			i.status, COALESCE(i.resolved_in_release, ''), i.resolved_at, i.is_regression,
 			COALESCE(i.code_snippet, ''),
-			COALESCE(i.php_version, '')
+			COALESCE(i.php_version, ''),
+			COALESCE(i.laravel_version, ''),
+			COALESCE(i.route_name, ''),
+			COALESCE(i.route_action, ''),
+			COALESCE(i.execution_type, 'http'),
+			COALESCE(i.request_context, ''),
+			COALESCE(i.queue_context, ''),
+			COALESCE(i.system_context, ''),
+			COALESCE(i.breadcrumbs, '')
 		FROM incidents i
 		LEFT JOIN projects p ON i.project_id = p.id
 		WHERE i.id = ?`, id)
@@ -451,6 +582,7 @@ func (r *IncidentRepo) GetIncidentByID(ctx context.Context, id int64) (*domain.I
 	var resolvedAt sql.NullTime
 	var isRegrInt int
 	var snippetRaw string
+	var reqContextRaw, queueContextRaw, systemContextRaw, breadcrumbsRaw string
 	err := row.Scan(
 		&inc.ID, &inc.ProjectID, &inc.ProjectName, &inc.Hash, &inc.ExceptionClass, &inc.Message,
 		&inc.File, &inc.Line, &inc.StackTrace, &inc.AppURL, &inc.RequestURL,
@@ -459,6 +591,14 @@ func (r *IncidentRepo) GetIncidentByID(ctx context.Context, id int64) (*domain.I
 		&inc.Status, &inc.ResolvedInRelease, &resolvedAt, &isRegrInt,
 		&snippetRaw,
 		&inc.PHPVersion,
+		&inc.LaravelVersion,
+		&inc.RouteName,
+		&inc.RouteAction,
+		&inc.ExecutionType,
+		&reqContextRaw,
+		&queueContextRaw,
+		&systemContextRaw,
+		&breadcrumbsRaw,
 	)
 	if err != nil {
 		return nil, err
@@ -471,6 +611,47 @@ func (r *IncidentRepo) GetIncidentByID(ctx context.Context, id int64) (*domain.I
 		var snippet domain.CodeSnippet
 		if err := json.Unmarshal([]byte(snippetRaw), &snippet); err == nil {
 			inc.CodeSnippet = &snippet
+		}
+	}
+
+	if reqContextRaw != "" {
+		var reqData domain.RequestContextData
+		if err := json.Unmarshal([]byte(reqContextRaw), &reqData); err == nil {
+			inc.Route = reqData.Route
+			inc.HTTPRequest = reqData.HTTPRequest
+		}
+	}
+	if inc.Route == nil && (inc.RouteName != "" || inc.RouteAction != "") {
+		inc.Route = &domain.RouteContext{
+			Name:   inc.RouteName,
+			Action: inc.RouteAction,
+		}
+	}
+
+	if queueContextRaw != "" {
+		var queueJob domain.QueueJobContext
+		if err := json.Unmarshal([]byte(queueContextRaw), &queueJob); err == nil {
+			inc.QueueJob = &queueJob
+		}
+	}
+
+	inc.Execution = &domain.ExecutionContext{
+		Type:     inc.ExecutionType,
+		IsCLI:    inc.ExecutionType == "console" || inc.ExecutionType == "queue",
+		QueueJob: inc.QueueJob,
+	}
+
+	if systemContextRaw != "" {
+		var sys domain.SystemContext
+		if err := json.Unmarshal([]byte(systemContextRaw), &sys); err == nil {
+			inc.System = &sys
+		}
+	}
+
+	if breadcrumbsRaw != "" {
+		var bcs []domain.Breadcrumb
+		if err := json.Unmarshal([]byte(breadcrumbsRaw), &bcs); err == nil {
+			inc.Breadcrumbs = bcs
 		}
 	}
 	return &inc, nil

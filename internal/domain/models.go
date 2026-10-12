@@ -39,8 +39,81 @@ type EventPayload struct {
 	Tags           map[string]string `json:"tags,omitempty"`
 	Fingerprint    []string          `json:"fingerprint,omitempty"`
 	Commit         string            `json:"commit,omitempty"`
-	CodeSnippet    *CodeSnippet      `json:"code_snippet,omitempty"`
-	PHPVersion     string            `json:"php_version,omitempty"`
+	CodeSnippet    *CodeSnippet        `json:"code_snippet,omitempty"`
+	PHPVersion     string              `json:"php_version,omitempty"`
+	LaravelVersion string              `json:"laravel_version,omitempty"`
+	Route          *RouteContext       `json:"route,omitempty"`
+	HTTPRequest    *HTTPRequestContext `json:"http_request,omitempty"`
+	Execution      *ExecutionContext   `json:"execution,omitempty"`
+	Breadcrumbs    []Breadcrumb        `json:"breadcrumbs,omitempty"`
+	System         *SystemContext      `json:"system,omitempty"`
+}
+
+// RouteContext represents route information
+type RouteContext struct {
+	Name       string         `json:"name,omitempty"`
+	Action     string         `json:"action,omitempty"`
+	Middleware []string       `json:"middleware,omitempty"`
+	Parameters map[string]any `json:"parameters,omitempty"`
+}
+
+// HTTPRequestContext represents incoming HTTP request details
+type HTTPRequestContext struct {
+	URL         string            `json:"url,omitempty"`
+	Method      string            `json:"method,omitempty"`
+	QueryString string            `json:"query_string,omitempty"`
+	QueryParams map[string]any    `json:"query_params,omitempty"`
+	Headers     map[string]string `json:"headers,omitempty"`
+	ClientIP    string            `json:"client_ip,omitempty"`
+	Body        map[string]any    `json:"body,omitempty"`
+}
+
+// QueueJobContext represents queued background job details
+type QueueJobContext struct {
+	JobName    string `json:"job_name,omitempty"`
+	Queue      string `json:"queue,omitempty"`
+	Connection string `json:"connection,omitempty"`
+	Attempts   int    `json:"attempts,omitempty"`
+	MaxTries   *int   `json:"max_tries,omitempty"`
+	Timeout    int    `json:"timeout,omitempty"`
+}
+
+// ExecutionContext represents execution environment (HTTP, Queue, Console)
+type ExecutionContext struct {
+	Type     string           `json:"type"` // "http" | "queue" | "console"
+	IsCLI    bool             `json:"is_cli"`
+	Command  string           `json:"command,omitempty"`
+	QueueJob *QueueJobContext `json:"queue_job,omitempty"`
+}
+
+// Breadcrumb represents a single breadcrumb event
+type Breadcrumb struct {
+	Category  string         `json:"category"` // "sql" | "log" | "http" | "queue" | "cache"
+	Level     string         `json:"level,omitempty"` // "info" | "warning" | "error"
+	Message   string         `json:"message"`
+	Data      map[string]any `json:"data,omitempty"`
+	Timestamp float64        `json:"timestamp"`
+}
+
+// SystemContext represents runtime resource and environment metrics
+type SystemContext struct {
+	PHPVersion       string  `json:"php_version,omitempty"`
+	LaravelVersion   string  `json:"laravel_version,omitempty"`
+	MemoryUsageBytes int64   `json:"memory_usage_bytes,omitempty"`
+	MemoryPeakBytes  int64   `json:"memory_peak_bytes,omitempty"`
+	DurationMS       float64 `json:"duration_ms,omitempty"`
+	Hostname         string  `json:"hostname,omitempty"`
+	OS               string  `json:"os,omitempty"`
+	SAPI             string  `json:"sapi,omitempty"`
+	Locale           string  `json:"locale,omitempty"`
+	ConfigCached     *bool   `json:"config_cached,omitempty"`
+	RoutesCached     *bool   `json:"routes_cached,omitempty"`
+}
+
+// RequestContextData wraps both route and HTTP request for storage in request_context column
+type RequestContextData struct {
+	Route       *RouteContext       `json:"route,omitempty"`
+	HTTPRequest *HTTPRequestContext `json:"http_request,omitempty"`
 }
 
 // CodeLine represents a single line of source code surrounding an error
@@ -113,7 +186,17 @@ type Incident struct {
 	ResolvedAt        *time.Time     `json:"resolved_at,omitempty"`
 	IsRegression      bool           `json:"is_regression"`
 	CodeSnippet       *CodeSnippet   `json:"code_snippet,omitempty"`
-	PHPVersion        string         `json:"php_version,omitempty"`
+	PHPVersion        string              `json:"php_version,omitempty"`
+	LaravelVersion    string              `json:"laravel_version,omitempty"`
+	RouteName         string              `json:"route_name,omitempty"`
+	RouteAction       string              `json:"route_action,omitempty"`
+	ExecutionType     string              `json:"execution_type,omitempty"`
+	Route             *RouteContext       `json:"route,omitempty"`
+	HTTPRequest       *HTTPRequestContext `json:"http_request,omitempty"`
+	Execution         *ExecutionContext   `json:"execution,omitempty"`
+	QueueJob          *QueueJobContext    `json:"queue_job,omitempty"`
+	System            *SystemContext      `json:"system,omitempty"`
+	Breadcrumbs       []Breadcrumb        `json:"breadcrumbs,omitempty"`
 }
 
 // IncidentDetail represents extended incident view with parsed stack frames

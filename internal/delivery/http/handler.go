@@ -211,11 +211,25 @@ func (h *APIHandler) HandleEvent(w http.ResponseWriter, r *http.Request) {
 	payload.RequestURL = strings.TrimSpace(payload.RequestURL)
 	payload.StackTrace = strings.TrimSpace(payload.StackTrace)
 	payload.PHPVersion = strings.TrimSpace(payload.PHPVersion)
+	if payload.PHPVersion == "" && payload.System != nil && payload.System.PHPVersion != "" {
+		payload.PHPVersion = strings.TrimSpace(payload.System.PHPVersion)
+	}
 	if payload.PHPVersion == "" && payload.Tags != nil {
 		if v, ok := payload.Tags["php_version"]; ok {
 			payload.PHPVersion = strings.TrimSpace(v)
 		} else if v, ok := payload.Tags["php"]; ok {
 			payload.PHPVersion = strings.TrimSpace(v)
+		}
+	}
+	payload.LaravelVersion = strings.TrimSpace(payload.LaravelVersion)
+	if payload.LaravelVersion == "" && payload.System != nil && payload.System.LaravelVersion != "" {
+		payload.LaravelVersion = strings.TrimSpace(payload.System.LaravelVersion)
+	}
+	if payload.LaravelVersion == "" && payload.Tags != nil {
+		if v, ok := payload.Tags["laravel_version"]; ok {
+			payload.LaravelVersion = strings.TrimSpace(v)
+		} else if v, ok := payload.Tags["laravel"]; ok {
+			payload.LaravelVersion = strings.TrimSpace(v)
 		}
 	}
 
@@ -302,11 +316,25 @@ func (h *APIHandler) HandleBatchEvents(w http.ResponseWriter, r *http.Request) {
 		payload.RequestURL = strings.TrimSpace(payload.RequestURL)
 		payload.StackTrace = strings.TrimSpace(payload.StackTrace)
 		payload.PHPVersion = strings.TrimSpace(payload.PHPVersion)
+		if payload.PHPVersion == "" && payload.System != nil && payload.System.PHPVersion != "" {
+			payload.PHPVersion = strings.TrimSpace(payload.System.PHPVersion)
+		}
 		if payload.PHPVersion == "" && payload.Tags != nil {
 			if v, ok := payload.Tags["php_version"]; ok {
 				payload.PHPVersion = strings.TrimSpace(v)
 			} else if v, ok := payload.Tags["php"]; ok {
 				payload.PHPVersion = strings.TrimSpace(v)
+			}
+		}
+		payload.LaravelVersion = strings.TrimSpace(payload.LaravelVersion)
+		if payload.LaravelVersion == "" && payload.System != nil && payload.System.LaravelVersion != "" {
+			payload.LaravelVersion = strings.TrimSpace(payload.System.LaravelVersion)
+		}
+		if payload.LaravelVersion == "" && payload.Tags != nil {
+			if v, ok := payload.Tags["laravel_version"]; ok {
+				payload.LaravelVersion = strings.TrimSpace(v)
+			} else if v, ok := payload.Tags["laravel"]; ok {
+				payload.LaravelVersion = strings.TrimSpace(v)
 			}
 		}
 

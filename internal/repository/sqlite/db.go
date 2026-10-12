@@ -74,6 +74,14 @@ func InitDB(dbPath string) (*sql.DB, error) {
 		is_regression INTEGER NOT NULL DEFAULT 0,
 		code_snippet TEXT,
 		php_version TEXT,
+		laravel_version TEXT,
+		route_name TEXT,
+		route_action TEXT,
+		execution_type TEXT DEFAULT 'http',
+		system_context TEXT,
+		request_context TEXT,
+		queue_context TEXT,
+		breadcrumbs TEXT,
 		FOREIGN KEY(project_id) REFERENCES projects(id)
 	);
 	`
@@ -97,6 +105,7 @@ func InitDB(dbPath string) (*sql.DB, error) {
 	createIndexes := `
 	CREATE INDEX IF NOT EXISTS idx_incidents_status ON incidents(project_id, status);
 	CREATE INDEX IF NOT EXISTS idx_incidents_last_seen ON incidents(project_id, last_seen_at DESC);
+	CREATE INDEX IF NOT EXISTS idx_incidents_execution ON incidents(project_id, execution_type);
 	`
 	if _, err := db.Exec(createIndexes); err != nil {
 		return nil, fmt.Errorf("failed to create indexes: %w", err)
@@ -144,6 +153,14 @@ func migrateIncidentsColumns(db *sql.DB) error {
 		{"is_regression", "INTEGER NOT NULL DEFAULT 0"},
 		{"code_snippet", "TEXT"},
 		{"php_version", "TEXT"},
+		{"laravel_version", "TEXT"},
+		{"route_name", "TEXT"},
+		{"route_action", "TEXT"},
+		{"execution_type", "TEXT DEFAULT 'http'"},
+		{"system_context", "TEXT"},
+		{"request_context", "TEXT"},
+		{"queue_context", "TEXT"},
+		{"breadcrumbs", "TEXT"},
 	}
 
 	for _, col := range columnsToAdd {
