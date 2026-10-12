@@ -534,7 +534,7 @@ paths:
                 github_repo_id:
                   type: integer
                   example: 7
-                  description: ID репозитория из github_repos; репозиторий должен быть выбран в аккаунте
+                  description: ID репозитория из github_repos; репозиторий должен быть выбран в аккаунте. Обязательное поле, 0 отвязывает репозиторий
                 github_branch:
                   type: string
                   example: main
@@ -557,7 +557,7 @@ paths:
                   project_id:
                     type: integer
         '400':
-          description: Неверный JSON или репозиторий не найден среди выбранных
+          description: Неверный JSON, не передан github_repo_id или репозиторий не найден среди выбранных
         '401':
           $ref: '#/components/responses/Unauthorized'
 

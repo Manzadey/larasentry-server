@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"path/filepath"
 	"testing"
+	"time"
 
 	"server/internal/domain"
 )
@@ -240,5 +241,25 @@ func TestGitHubAccountRepo_SetSyncError_KeepsRepos(t *testing.T) {
 	selected, err := repo.ListSelectedRepos(ctx)
 	if err != nil || len(selected) != 1 || selected[0].FullName != "org/a" {
 		t.Errorf("unexpected selected repos: %+v, err %v", selected, err)
+	}
+}
+
+func TestInitDB_ConcurrentWriterWaitsForLock(t *testing.T) {
+	db := newTestDB(t)
+
+	tx, err := db.Begin()
+	if err != nil {
+		t.Fatalf("failed to begin tx: %v", err)
+	}
+	if _, err := tx.Exec("INSERT INTO github_accounts (name, token) VALUES ('a', 't')"); err != nil {
+		t.Fatalf("failed to write in tx: %v", err)
+	}
+	go func() {
+		time.Sleep(200 * time.Millisecond)
+		tx.Commit()
+	}()
+
+	if _, err := db.Exec("INSERT INTO github_accounts (name, token) VALUES ('b', 't')"); err != nil {
+		t.Fatalf("concurrent write must wait for the lock instead of failing: %v", err)
 	}
 }

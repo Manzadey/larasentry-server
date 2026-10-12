@@ -2,6 +2,7 @@ package usecase
 
 import (
 	"context"
+	"errors"
 	"io"
 	"net/http"
 	"path/filepath"
@@ -117,5 +118,33 @@ func TestGitHubAccounts_Sync_FailureKeepsRepos(t *testing.T) {
 	acc, _ = repo.Get(ctx, id)
 	if acc.SyncError != "" {
 		t.Errorf("successful sync must clear sync_error, got %q", acc.SyncError)
+	}
+}
+
+type failingApplyRepo struct {
+	domain.GitHubAccountRepository
+}
+
+func (f failingApplyRepo) ApplySync(ctx context.Context, accountID int64, login string, repos []domain.GitHubRepo) error {
+	return errors.New("database is locked")
+}
+
+func TestGitHubAccounts_Sync_StoreFailureRecorded(t *testing.T) {
+	status := http.StatusOK
+	svc, repo := newGitHubAccountsTest(t, &status)
+	ctx := context.Background()
+	id, err := svc.Create(ctx, "Work", "tok")
+	if err != nil {
+		t.Fatalf("Create failed: %v", err)
+	}
+
+	failing := NewGitHubAccounts(failingApplyRepo{repo}, svc.client)
+	if err := failing.Sync(ctx, id); err == nil {
+		t.Fatal("expected sync error")
+	}
+
+	acc, _ := repo.Get(ctx, id)
+	if !strings.Contains(acc.SyncError, "database is locked") {
+		t.Errorf("store failure must be visible in sync_error, got %q", acc.SyncError)
 	}
 }

@@ -459,6 +459,22 @@ func TestHandleUpdateProjectGitHub(t *testing.T) {
 	}
 }
 
+func TestHandleUpdateProjectGitHub_RejectsLegacyBody(t *testing.T) {
+	handler, _, _ := setupTestAPIHandler(t)
+
+	body := `{"github_repo":"org/app","github_token":"ghp_x","github_branch":"main"}`
+	req := httptest.NewRequest(http.MethodPut, "/api/projects/1/github", bytes.NewReader([]byte(body)))
+	req.Header.Set("Content-Type", "application/json")
+	req.SetPathValue("id", "1")
+	rec := httptest.NewRecorder()
+
+	handler.HandleUpdateProjectGitHub(rec, req)
+
+	if rec.Code != http.StatusBadRequest {
+		t.Fatalf("legacy body without github_repo_id must be rejected, got %d: %s", rec.Code, rec.Body.String())
+	}
+}
+
 func TestHandleUpdateProjectGitHub_RejectsUnselectedRepo(t *testing.T) {
 	handler, _, _ := setupTestAPIHandler(t)
 

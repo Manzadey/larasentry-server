@@ -3,6 +3,7 @@ package usecase
 import (
 	"context"
 	"errors"
+	"fmt"
 	"log"
 	"strings"
 
@@ -40,18 +41,27 @@ func (s *GitHubAccounts) Create(ctx context.Context, name, token string) (int64,
 func (s *GitHubAccounts) Sync(ctx context.Context, id int64) error {
 	acc, err := s.repo.Get(ctx, id)
 	if err != nil {
+		log.Printf("[github] sync account %d: %v", id, err)
 		return err
 	}
 
 	login, repos, err := s.fetch(ctx, acc.Token)
 	if err != nil {
-		log.Printf("[github] sync account %d: %v", id, err)
-		if saveErr := s.repo.SetSyncError(ctx, id, err.Error()); saveErr != nil {
-			log.Printf("[github] save sync error for account %d: %v", id, saveErr)
-		}
+		s.recordSyncError(ctx, id, err)
 		return err
 	}
-	return s.repo.ApplySync(ctx, id, login, repos)
+	if err := s.repo.ApplySync(ctx, id, login, repos); err != nil {
+		s.recordSyncError(ctx, id, fmt.Errorf("Не удалось сохранить список репозиториев: %w", err))
+		return err
+	}
+	return nil
+}
+
+func (s *GitHubAccounts) recordSyncError(ctx context.Context, id int64, err error) {
+	log.Printf("[github] sync account %d: %v", id, err)
+	if saveErr := s.repo.SetSyncError(ctx, id, err.Error()); saveErr != nil {
+		log.Printf("[github] save sync error for account %d: %v", id, saveErr)
+	}
 }
 
 func (s *GitHubAccounts) fetch(ctx context.Context, token string) (string, []domain.GitHubRepo, error) {

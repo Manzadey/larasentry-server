@@ -896,7 +896,8 @@ func (h *APIHandler) HandleUpdateProjectGitHub(w http.ResponseWriter, r *http.Re
 	}
 
 	var req struct {
-		GitHubRepoID int64  `json:"github_repo_id"`
+		// Указатель отличает «поле не передано» от 0: иначе старый формат запроса молча отвязывал бы проект
+		GitHubRepoID *int64 `json:"github_repo_id"`
 		GitHubBranch string `json:"github_branch"`
 		PathPrefix   string `json:"path_prefix"`
 	}
@@ -904,8 +905,12 @@ func (h *APIHandler) HandleUpdateProjectGitHub(w http.ResponseWriter, r *http.Re
 		writeError(w, http.StatusBadRequest, "Bad Request - Invalid JSON")
 		return
 	}
+	if req.GitHubRepoID == nil {
+		writeError(w, http.StatusBadRequest, "github_repo_id is required (github_repo/github_token are no longer supported, connect accounts at /ui/github)")
+		return
+	}
 
-	err = h.projectRepo.UpdateGitHubSettings(r.Context(), id, req.GitHubRepoID, req.GitHubBranch, req.PathPrefix)
+	err = h.projectRepo.UpdateGitHubSettings(r.Context(), id, *req.GitHubRepoID, req.GitHubBranch, req.PathPrefix)
 	if errors.Is(err, domain.ErrGitHubRepoNotSelected) {
 		writeError(w, http.StatusBadRequest, err.Error())
 		return

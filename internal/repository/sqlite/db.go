@@ -19,7 +19,9 @@ func InitDB(dbPath string) (*sql.DB, error) {
 		}
 	}
 
-	db, err := sql.Open("sqlite", dbPath)
+	// PRAGMA действует на одно соединение, поэтому busy_timeout задаётся в DSN для всего пула:
+	// без него параллельная запись (синхронизация GitHub vs приём событий) сразу падает с SQLITE_BUSY
+	db, err := sql.Open("sqlite", dbPath+"?_pragma=busy_timeout(5000)")
 	if err != nil {
 		return nil, err
 	}
