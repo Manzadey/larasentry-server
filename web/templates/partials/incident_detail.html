@@ -71,625 +71,275 @@
     {{end}}
   </header>
 
-  <div class="flex-1 overflow-y-auto p-6 space-y-6">
+  <div role="tablist" aria-label="Разделы ошибки" class="dtabs">
+    <button type="button" role="tab" id="tab-stack" class="dtab h-tab" data-tab="stack" aria-controls="panel-stack" aria-selected="true">Стек вызовов</button>
+    <button type="button" role="tab" id="tab-context" class="dtab h-tab" data-tab="context" aria-controls="panel-context" aria-selected="false" tabindex="-1">Контекст</button>
+    <button type="button" role="tab" id="tab-breadcrumbs" class="dtab h-tab" data-tab="breadcrumbs" aria-controls="panel-breadcrumbs" aria-selected="false" tabindex="-1">Хлебные крошки{{with $inc.Breadcrumbs}}<span class="dtab-count">{{len .}}</span>{{end}}</button>
+    <button type="button" role="tab" id="tab-env" class="dtab h-tab" data-tab="env" aria-controls="panel-env" aria-selected="false" tabindex="-1">Окружение</button>
+  </div>
 
-    <!-- Панель переключения вкладок (Tabs Navigation) -->
-    <div class="border-b border-slate-800 flex items-center gap-1 overflow-x-auto pb-1 pt-2">
-      <!-- Вкладка 1: Стек вызовов -->
-      <button type="button" 
-              id="tab-btn-stack"
-              onclick="switchDetailTab('stack')"
-              class="px-3.5 py-2 text-xs font-semibold rounded-lg bg-rose-500/15 text-rose-300 border border-rose-500/30 flex items-center gap-1.5 transition">
-        <svg class="w-3.5 h-3.5 text-rose-400" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10 20l4-16m4 4l4 4-4 4M6 16l-4-4 4-4"/></svg>
-        <span>Стек вызовов</span>
-      </button>
-
-      <!-- Вкладка 2: Хлебные крошки -->
-      <button type="button" 
-              id="tab-btn-breadcrumbs"
-              onclick="switchDetailTab('breadcrumbs')"
-              class="px-3.5 py-2 text-xs font-medium rounded-lg text-slate-400 hover:text-slate-200 hover:bg-slate-800/60 border border-transparent flex items-center gap-1.5 transition">
-        <svg class="w-3.5 h-3.5 text-indigo-400" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 5l7 7-7 7M5 5l7 7-7 7"/></svg>
-        <span>Хлебные крошки</span>
-        {{if .Incident.Breadcrumbs}}
-        <span class="px-1.5 py-0.2 rounded-full text-[10px] font-mono bg-indigo-500/25 text-indigo-200">{{len .Incident.Breadcrumbs}}</span>
-        {{end}}
-      </button>
-
-      <!-- Вкладка: Контекст приложения -->
-      <button type="button"
-              id="tab-btn-context"
-              onclick="switchDetailTab('context')"
-              class="px-3.5 py-2 text-xs font-medium rounded-lg text-slate-400 hover:text-slate-200 hover:bg-slate-800/60 border border-transparent flex items-center gap-1.5 transition">
-        <svg class="w-3.5 h-3.5 text-violet-400" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M7 7h.01M7 3h5c.512 0 1.024.195 1.414.586l7 7a2 2 0 010 2.828l-7 7a2 2 0 01-2.828 0l-7-7A1.994 1.994 0 013 12V7a4 4 0 014-4z"/></svg>
-        <span>Контекст</span>
-        {{if .Incident.AppContext}}
-        <span class="w-1.5 h-1.5 rounded-full bg-violet-400"></span>
-        {{end}}
-      </button>
-
-      <!-- Вкладка 3: Запрос / Очередь -->
-      <button type="button" 
-              id="tab-btn-request"
-              onclick="switchDetailTab('request')"
-              class="px-3.5 py-2 text-xs font-medium rounded-lg text-slate-400 hover:text-slate-200 hover:bg-slate-800/60 border border-transparent flex items-center gap-1.5 transition">
-        <svg class="w-3.5 h-3.5 text-sky-400" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 9l3 3-3 3m5 0h3M5 20h14a2 2 0 002-2V6a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z"/></svg>
-        <span>Запрос / Очередь</span>
-        {{if or (eq .Incident.ExecutionType "queue") .Incident.QueueJob}}
-        <span class="px-1.5 py-0.2 rounded text-[10px] font-semibold bg-amber-500/20 text-amber-300">Queue</span>
-        {{end}}
-      </button>
-
-      <!-- Вкладка 4: Система и окружение -->
-      <button type="button" 
-              id="tab-btn-system"
-              onclick="switchDetailTab('system')"
-              class="px-3.5 py-2 text-xs font-medium rounded-lg text-slate-400 hover:text-slate-200 hover:bg-slate-800/60 border border-transparent flex items-center gap-1.5 transition">
-        <svg class="w-3.5 h-3.5 text-emerald-400" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 3v2m6-2v2M9 19v2m6-2v2M5 9H3m2 6H3m18-6h-2m2 6h-2M7 19h10a2 2 0 002-2V7a2 2 0 00-2-2H7a2 2 0 00-2 2v10a2 2 0 002 2zM9 9h6v6H9V9z"/></svg>
-        <span>Система</span>
-      </button>
-    </div>
-
-    <!-- КОНТЕНТ ВКЛАДОК -->
-
-    <!-- ==================== ВКЛАДКА 1: СТЕК ВЫЗОВОВ ==================== -->
-    <div id="tab-content-stack" class="space-y-6">
-      <!-- Блок контекста исходного кода (Code Snippet & GitHub Integration) -->
-      {{if .CodeSnippet}}
-      <div class="space-y-2" id="code-snippet-section">
-        <div class="flex items-center justify-between gap-2 flex-wrap">
-          <span class="text-xs font-semibold uppercase tracking-wider text-slate-400 flex items-center gap-2">
-            <svg class="w-4 h-4 text-emerald-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10 20l4-16m4 4l4 4-4 4M6 16l-4-4 4-4" />
-            </svg>
-            Место вызова ошибки
-            {{if eq .CodeSnippet.Source "github"}}
-            <span class="px-1.5 py-0.2 rounded text-[10px] font-mono bg-purple-500/20 text-purple-300 border border-purple-500/30">GitHub API</span>
-            {{else if eq .CodeSnippet.Source "client"}}
-            <span class="px-1.5 py-0.2 rounded text-[10px] font-mono bg-emerald-500/20 text-emerald-300 border border-emerald-500/30">Client Snippet</span>
-            {{end}}
-          </span>
-
-          <div class="flex items-center gap-2">
-            {{if .CodeSnippet.GitHubURL}}
-            <a href="{{.CodeSnippet.GitHubURL}}" target="_blank" rel="noopener noreferrer"
-               class="px-2.5 py-1 text-xs rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-200 border border-slate-700 hover:border-slate-600 transition flex items-center gap-1.5 font-medium shadow-sm"
-               title="Открыть файл и строку в GitHub">
-              <svg class="w-3.5 h-3.5 text-white" fill="currentColor" viewBox="0 0 24 24">
-                <path fill-rule="evenodd" clip-rule="evenodd" d="M12 2C6.477 2 2 6.484 2 12.017c0 4.425 2.865 8.18 6.839 9.504.5.092.682-.217.682-.483 0-.237-.008-.868-.013-1.703-2.782.605-3.369-1.343-3.369-1.343-.454-1.158-1.11-1.466-1.11-1.466-.908-.62.069-.608.069-.608 1.003.07 1.53 1.032 1.53 1.032.892 1.53 2.341 1.088 2.91.832.092-.647.35-1.088.636-1.338-2.22-.253-4.555-1.113-4.555-4.951 0-1.093.39-1.988 1.029-2.688-.103-.253-.446-1.272.098-2.65 0 0 .84-.27 2.75 1.026A9.564 9.564 0 0112 6.844c.85.004 1.705.115 2.504.337 1.909-1.296 2.747-1.027 2.747-1.027.546 1.379.202 2.398.1 2.651.64.7 1.028 1.595 1.028 2.688 0 3.848-2.339 4.695-4.566 4.943.359.309.678.92.678 1.855 0 1.338-.012 2.419-.012 2.747 0 .268.18.58.688.482A10.019 10.019 0 0022 12.017C22 6.484 17.522 2 12 2z"/>
-              </svg>
-              <span>Открыть в GitHub</span>
-            </a>
-            {{end}}
-
-            {{if .IssueURL}}
-            <a href="{{.IssueURL}}" target="_blank" rel="noopener noreferrer"
-               class="px-2.5 py-1 text-xs rounded-lg bg-indigo-600/20 hover:bg-indigo-600/30 text-indigo-300 border border-indigo-500/30 hover:border-indigo-500/50 transition flex items-center gap-1.5 font-medium shadow-sm"
-               title="Создать Issue в репозитории">
-              <svg class="w-3.5 h-3.5 text-indigo-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z"/>
-              </svg>
-              <span>Создать Issue</span>
-            </a>
-            {{end}}
+  <div class="dbody">
+    <div role="tabpanel" id="panel-stack" aria-labelledby="tab-stack" class="dpanel">
+      <section class="dsec">
+        <div class="dsec-head">
+          <h3>Место ошибки</h3>
+          <div class="flex items-center gap-3 flex-wrap" style="font-size: 13px">
+            {{if and .CodeSnippet .CodeSnippet.GitHubURL}}<a href="{{.CodeSnippet.GitHubURL}}" target="_blank" rel="noopener" class="h-link" style="text-decoration: none">Открыть в GitHub</a>{{end}}
+            {{if .IssueURL}}<a href="{{.IssueURL}}" target="_blank" rel="noopener" class="h-link" style="text-decoration: none">Создать issue</a>{{end}}
           </div>
         </div>
-
-        <!-- Контейнер с кодом -->
-        <div class="bg-slate-950 border border-slate-800 rounded-xl overflow-hidden shadow-inner text-xs font-mono">
-          <div class="px-3.5 py-2 bg-slate-900/80 border-b border-slate-800 flex items-center justify-between text-slate-400">
-            <span class="break-all text-slate-300 font-semibold">{{.CodeSnippet.File}}:<span class="text-rose-400 font-bold">{{.CodeSnippet.Line}}</span></span>
-            <span class="text-[11px] text-slate-500">Строка ошибки: <strong class="text-rose-400">{{.CodeSnippet.Line}}</strong></span>
+        {{if and .CodeSnippet .CodeSnippet.Lines}}
+        <div class="snippet">
+          <div class="snippet-file mono">{{.CodeSnippet.File}}:{{.CodeSnippet.Line}}</div>
+          <div class="snippet-code mono">
+            {{range .CodeSnippet.Lines}}<div class="sl{{if .IsError}} sl-hit{{end}}"><span class="sl-n">{{.Number}}</span><span class="sl-code">{{if .Code}}{{.Code}}{{else}} {{end}}</span></div>{{end}}
           </div>
-
-          {{if .CodeSnippet.Lines}}
-          <div class="overflow-x-auto py-1">
-            <table class="w-full border-collapse">
-              <tbody>
-                {{range .CodeSnippet.Lines}}
-                <tr class="{{if .IsError}}bg-rose-950/50 border-l-2 border-rose-500 text-rose-200 font-bold{{else}}hover:bg-slate-900/50 text-slate-400{{end}} leading-relaxed">
-                  <td class="w-12 py-0.5 pr-3 text-right select-none font-mono text-[11px] {{if .IsError}}text-rose-400 font-bold bg-rose-500/10{{else}}text-slate-600{{end}}">
-                    {{.Number}}
-                  </td>
-                  <td class="py-0.5 pl-2 pr-4 font-mono whitespace-pre select-all {{if .IsError}}text-rose-200{{else}}text-slate-300{{end}}">
-                    {{.Code}}
-                  </td>
-                </tr>
-                {{end}}
-              </tbody>
-            </table>
-          </div>
-          {{else}}
-          <div class="p-4 text-center text-slate-500 text-xs">
-            Фрагмент кода недоступен для локального отображения
-          </div>
-          {{end}}
         </div>
-      </div>
-      {{end}}
+        {{else}}
+        <div class="note-dashed">{{.SnippetNote}}</div>
+        {{end}}
+      </section>
 
-      <!-- Стек-трейс (Stack Trace) -->
-      <div class="space-y-2.5" id="stack-trace-section">
-        <div class="flex flex-wrap items-center justify-between gap-2">
-          <span class="text-xs font-semibold uppercase tracking-wider text-slate-400 flex items-center gap-2">
-            <svg class="w-4 h-4 text-slate-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10 20l4-16m4 4l4 4-4 4M6 16l-4-4 4-4" />
-            </svg>
-            Стек вызовов (Stack Trace)
-          </span>
-
-          <div class="flex items-center gap-2">
-            <!-- Фильтр vendor / код приложения -->
-            <div class="inline-flex items-center p-0.5 bg-slate-950 border border-slate-800 rounded-lg text-xs">
-              <button type="button" 
-                      id="btn-filter-app"
-                      onclick="setStackTraceFilter('app')"
-                      class="px-2.5 py-1 rounded-md transition flex items-center gap-1.5 font-medium bg-rose-500/15 text-rose-300 border border-rose-500/30"
-                      title="Показать только вызовы приложения (скрыть vendor)">
-                <span>Без vendor</span>
-                <span id="badge-app-count" class="px-1.5 py-0.2 rounded-full text-[10px] bg-rose-500/25 text-rose-200 font-mono">{{.Incident.StackTraceStats.AppFrames}}</span>
-              </button>
-              <button type="button" 
-                      id="btn-filter-all"
-                      onclick="setStackTraceFilter('all')"
-                      class="px-2.5 py-1 rounded-md transition flex items-center gap-1.5 font-medium text-slate-400 hover:text-slate-200 hover:bg-slate-800/60 border border-transparent"
-                      title="Показать все вызовы включая vendor">
-                <span>Все</span>
-                <span id="badge-all-count" class="px-1.5 py-0.2 rounded-full text-[10px] bg-slate-800 text-slate-400 font-mono">{{.Incident.StackTraceStats.TotalFrames}}</span>
-              </button>
+      <section class="dsec">
+        <div class="dsec-head">
+          <h3>Вызовы</h3>
+          <div class="flex gap-2 flex-wrap">
+            <div role="group" aria-label="Вид вызовов" class="segments segments-sm">
+              <button type="button" class="seg h-seg" data-stack-view="list" aria-pressed="true">Список</button>
+              <button type="button" class="seg h-seg" data-stack-view="graph" aria-pressed="false">Схема</button>
             </div>
-
-            <!-- Кнопка копирования -->
-            <button id="copy-stack-btn"
-                    onclick="copyActiveStackTrace()"
-                    class="px-2.5 py-1 text-xs bg-slate-800 hover:bg-slate-700 text-slate-300 hover:text-white rounded-lg border border-slate-700 transition flex items-center gap-1.5"
-                    title="Копировать текущий стек-трейс">
-              <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 16H6a2 2 0 01-2-2V6a2 2 0 012-2h8a2 2 0 012 2v2m-6 12h8a2 2 0 002-2v-8a2 2 0 00-2-2h-8a2 2 0 00-2 2v8a2 2 0 002 2z"></path></svg>
-              <span>Копировать</span>
+            {{if .VendorFrames}}<button type="button" class="btn h-btn" data-vendor-toggle data-count="{{.VendorFrames}}" aria-pressed="false">Показать vendor ({{.VendorFrames}})</button>{{end}}
+            <button type="button" class="btn h-btn copy-btn" data-copy="{{$inc.StackTrace}}" aria-label="Копировать стек вызовов">
+              <svg class="i-copy" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M8 16H6a2 2 0 01-2-2V6a2 2 0 012-2h8a2 2 0 012 2v2m-6 12h8a2 2 0 002-2v-8a2 2 0 00-2-2h-8a2 2 0 00-2 2v8a2 2 0 002 2z"/></svg><svg class="i-check" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M5 13l4 4L19 7"/></svg>Копировать
             </button>
           </div>
         </div>
 
-        <!-- Окно стек-трейса -->
-        <div class="relative bg-slate-950 border border-slate-800 rounded-xl overflow-hidden shadow-inner">
-          <!-- Вид: Без vendor (App Only) -->
-          <div id="stack-trace-app-view">
-            {{if .Incident.AppStackTrace}}
-              <pre id="app-stack-trace" class="p-4 text-xs font-mono text-slate-200 overflow-x-auto leading-relaxed max-h-[460px] select-all whitespace-pre">{{trim .Incident.AppStackTrace}}</pre>
-            {{else if .Incident.StackTrace}}
-              <div class="p-6 text-center text-slate-400 text-xs flex flex-col items-center justify-center gap-2">
-                <svg class="w-7 h-7 text-slate-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                  <path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
-                </svg>
-                <span>Все вызовы в стек-трейсе происходят внутри <code class="px-1.5 py-0.5 rounded bg-slate-900 border border-slate-800 text-rose-400 font-mono">vendor</code> (код приложения не затронут в цепочке вызовов)</span>
-                <button type="button" onclick="setStackTraceFilter('all')" class="mt-1 px-3 py-1.5 bg-slate-800 hover:bg-slate-700 text-slate-200 rounded-lg border border-slate-700 transition flex items-center gap-1.5">
-                  Показать полный стек-трейс
-                </button>
-              </div>
-            {{else}}
-              <div class="p-6 text-center text-slate-500 text-xs font-mono">Стек-трейс не передан</div>
-            {{end}}
-          </div>
-
-          <!-- Вид: Все вызовы (Full Stack Trace) -->
-          <div id="stack-trace-all-view" class="hidden">
-            {{if .Incident.StackTrace}}
-              <pre id="raw-stack-trace" class="p-4 text-xs font-mono text-slate-300 overflow-x-auto leading-relaxed max-h-[460px] select-all whitespace-pre">{{trim .Incident.StackTrace}}</pre>
-            {{else}}
-              <div class="p-6 text-center text-slate-500 text-xs font-mono">Стек-трейс не передан</div>
-            {{end}}
-          </div>
+        {{if .StackGroups}}
+        <div class="frames" data-view="list">
+          {{range .StackGroups}}
+            {{if .Vendor}}
+            <details class="vgroup">
+              <summary class="frame-group h-group">
+                <svg class="chev" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M9 5l7 7-7 7"/></svg>
+                {{len .Frames}} {{plural (len .Frames) "кадр" "кадра" "кадров"}} из vendor
+              </summary>
+              {{range .Frames}}{{template "stack-frame" .}}{{end}}
+            </details>
+            {{else}}{{range .Frames}}{{template "stack-frame" .}}{{end}}{{end}}
+          {{end}}
         </div>
-      </div>
-    </div>
 
-    <!-- ==================== ВКЛАДКА 2: ХЛЕБНЫЕ КРОШКИ ==================== -->
-    <div id="tab-content-breadcrumbs" class="hidden space-y-4">
-      {{if .Incident.Breadcrumbs}}
-      <div class="relative pl-6 space-y-3 before:absolute before:left-2.5 before:top-2 before:bottom-2 before:w-0.5 before:bg-slate-800">
-        {{range .Incident.Breadcrumbs}}
-        <div class="relative group">
-          <!-- Маркер категории на таймлайне -->
-          <div class="absolute -left-6 top-1 w-5 h-5 rounded-full flex items-center justify-center text-[9px] font-bold 
-            {{if eq .Category "sql"}}bg-blue-900/80 text-blue-300 border border-blue-500/50
-            {{else if eq .Category "http"}}bg-purple-900/80 text-purple-300 border border-purple-500/50
-            {{else if eq .Category "log"}}
-              {{if eq .Level "error"}}bg-rose-900/80 text-rose-300 border border-rose-500/50
-              {{else if eq .Level "warning"}}bg-amber-900/80 text-amber-300 border border-amber-500/50
-              {{else}}bg-emerald-900/80 text-emerald-300 border border-emerald-500/50{{end}}
-            {{else if eq .Category "queue"}}bg-amber-900/80 text-amber-300 border border-amber-500/50
-            {{else}}bg-slate-800 text-slate-400 border border-slate-700{{end}}">
-            {{if eq .Category "sql"}}DB
-            {{else if eq .Category "http"}}API
-            {{else if eq .Category "log"}}LOG
-            {{else if eq .Category "queue"}}Q
-            {{else}}•{{end}}
-          </div>
-
-          <!-- Карточка события -->
-          <div class="bg-slate-950 border border-slate-800/80 rounded-xl p-3 space-y-2 hover:border-slate-700 transition">
-            <div class="flex items-center justify-between gap-2 text-xs">
-              <div class="flex items-center gap-2">
-                <span class="font-semibold uppercase tracking-wider text-[11px]
-                  {{if eq .Category "sql"}}text-blue-400
-                  {{else if eq .Category "http"}}text-purple-400
-                  {{else if eq .Category "log"}}text-emerald-400
-                  {{else}}text-slate-400{{end}}">
-                  {{.Category}}
-                </span>
-                {{if .Level}}
-                <span class="px-1.5 py-0.2 rounded text-[10px] uppercase font-mono
-                  {{if eq .Level "error"}}bg-rose-500/20 text-rose-300 border border-rose-500/30
-                  {{else if eq .Level "warning"}}bg-amber-500/20 text-amber-300 border border-amber-500/30
-                  {{else}}bg-slate-800 text-slate-400 border border-slate-700{{end}}">
-                  {{.Level}}
-                </span>
+        <div class="graph" data-view="graph" hidden>
+          <p class="graph-note">Сверху точка входа, ниже каждый следующий вызов, внизу место, где брошено исключение.</p>
+          {{range $i, $n := .CallGraph}}
+            {{if $i}}<div class="graph-arrow" aria-hidden="true"><span class="graph-line"></span><span class="mono">{{$n.Via}}</span></div>{{end}}
+            <div class="graph-node{{if not $n.Vendor}} is-app{{end}}">
+              <span class="graph-tag">{{if $n.Vendor}}vendor{{else}}ваш код{{end}}</span>
+              <div class="graph-text">
+                {{if $n.Group}}
+                <span class="graph-title">{{$n.Count}} {{plural $n.Count "кадр" "кадра" "кадров"}} из vendor</span>
+                {{with $n.Packages}}<span class="graph-calls">{{join . ", "}}</span>{{end}}
+                {{else}}
+                <span class="graph-title">{{if $n.Class}}<span class="ns">{{namespace $n.Class}}</span>{{baseName $n.Class}}{{else}}{{baseName $n.File}}{{end}}</span>
+                <span class="graph-calls">{{join $n.Calls ", "}}</span>
+                {{if $n.File}}<span class="graph-where">{{baseName $n.File}}</span>{{end}}
                 {{end}}
               </div>
-              {{if .Timestamp}}
-              <span class="text-[11px] font-mono text-slate-500" title="Timestamp: {{.Timestamp}}">
-                {{formatTimestamp .Timestamp}}
-              </span>
-              {{end}}
             </div>
-
-            <div class="text-xs font-mono text-slate-200 leading-relaxed break-all select-all whitespace-pre-wrap">{{.Message}}</div>
-
-            {{if .Data}}
-            <div class="pt-1.5 border-t border-slate-900 text-[11px] font-mono text-slate-400 space-y-1">
-              <div class="bg-slate-900/60 rounded-lg p-2 overflow-x-auto text-slate-300">
-                <pre class="whitespace-pre-wrap select-all">{{jsonPretty .Data}}</pre>
-              </div>
-            </div>
-            {{end}}
-          </div>
-        </div>
-        {{end}}
-      </div>
-      {{else}}
-      <div class="p-8 text-center text-slate-500 text-xs bg-slate-950 border border-slate-800 rounded-xl space-y-2">
-        <svg class="w-8 h-8 mx-auto text-slate-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z"></path>
-        </svg>
-        <div class="text-slate-400 font-medium">Хлебные крошки отсутствуют</div>
-        <div class="text-slate-600">Крошки записываются в кольцевой буфер клиентом (SQL-запросы, внешние HTTP-вызовы, логи приложения) перед возникновением ошибки.</div>
-      </div>
-      {{end}}
-    </div>
-
-    <!-- ==================== ВКЛАДКА: КОНТЕКСТ ПРИЛОЖЕНИЯ ==================== -->
-    <div id="tab-content-context" class="hidden space-y-4 text-xs">
-      {{if .Incident.AppContext}}
-        {{with .Incident.AppContext.Shared}}
-        <div class="space-y-2">
-          <span class="text-xs font-semibold uppercase tracking-wider text-slate-400">Shared (Laravel Context)</span>
-          {{if index . "_truncated"}}
-          <p class="text-amber-300">Контекст больше лимита ({{index . "_size"}} байт), обрезан на клиенте</p>
-          {{else}}
-          <pre class="bg-slate-950 border border-slate-800 rounded-xl p-3.5 overflow-x-auto font-mono text-slate-300">{{jsonPretty .}}</pre>
           {{end}}
-        </div>
-        {{end}}
-        {{with .Incident.AppContext.Exception}}
-        <div class="space-y-2">
-          <span class="text-xs font-semibold uppercase tracking-wider text-slate-400">Exception::context()</span>
-          {{if index . "_truncated"}}
-          <p class="text-amber-300">Контекст больше лимита ({{index . "_size"}} байт), обрезан на клиенте</p>
-          {{else}}
-          <pre class="bg-slate-950 border border-slate-800 rounded-xl p-3.5 overflow-x-auto font-mono text-slate-300">{{jsonPretty .}}</pre>
-          {{end}}
-        </div>
-        {{end}}
-      {{else}}
-      <p class="text-slate-500">
-        Приложение не передало контекст.
-        <a href="https://laravel.com/docs/11.x/context" target="_blank" rel="noopener" class="text-sky-400 hover:underline">Laravel Context</a>
-      </p>
-      {{end}}
-    </div>
-
-    <!-- ==================== ВКЛАДКА 3: ЗАПРОС / ОЧЕРЕДЬ ==================== -->
-    <div id="tab-content-request" class="hidden space-y-5 text-xs">
-      {{if or .Incident.Route .Incident.HTTPRequest}}
-        <!-- Блок Маршрута (Route) -->
-        {{if .Incident.Route}}
-        <div class="bg-slate-950 border border-slate-800 rounded-xl p-4 space-y-3">
-          <div class="text-xs font-semibold uppercase tracking-wider text-slate-400 flex items-center gap-1.5">
-            <svg class="w-4 h-4 text-sky-400" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 20l-5.447-2.724A1 1 0 013 16.382V5.618a1 1 0 011.447-.894L9 7m0 13l6-3m-6 3V7m6 10l4.553 2.276A1 1 0 0021 18.382V7.618a1 1 0 00-.553-.894L15 4m0 13V4m0 0L9 7"/></svg>
-            Контекст маршрута (Route)
-          </div>
-          <div class="grid grid-cols-1 sm:grid-cols-2 gap-3">
-            <div class="bg-slate-900/60 rounded-lg p-2.5">
-              <span class="text-slate-500 block text-[11px] mb-0.5">Имя маршрута (Route Name)</span>
-              <span class="font-mono text-sky-300 font-semibold select-all">{{if .Incident.Route.Name}}{{.Incident.Route.Name}}{{else}}—{{end}}</span>
-            </div>
-            <div class="bg-slate-900/60 rounded-lg p-2.5">
-              <span class="text-slate-500 block text-[11px] mb-0.5">Действие / Экшен</span>
-              <span class="font-mono text-slate-200 select-all break-all">{{if .Incident.Route.Action}}{{.Incident.Route.Action}}{{else}}—{{end}}</span>
+          {{if .CallGraph}}<div class="graph-arrow" aria-hidden="true"><span class="graph-line"></span><span class="mono">throw</span></div>{{end}}
+          <div class="graph-node is-throw">
+            <span class="graph-tag">throw</span>
+            <div class="graph-text">
+              <span class="graph-title"><span class="ns">{{namespace $inc.ExceptionClass}}</span>{{baseName $inc.ExceptionClass}}</span>
+              <span class="graph-calls">{{trim $inc.Message}}</span>
+              <span class="graph-where">{{baseName $inc.File}}:{{$inc.Line}}</span>
             </div>
           </div>
-          {{if .Incident.Route.Middleware}}
-          <div class="bg-slate-900/60 rounded-lg p-2.5 space-y-1.5">
-            <span class="text-slate-500 block text-[11px]">Примененные Middleware:</span>
-            <div class="flex flex-wrap gap-1.5">
-              {{range .Incident.Route.Middleware}}
-              <span class="px-2 py-0.5 rounded text-[11px] font-mono bg-slate-800 text-slate-300 border border-slate-700/60">{{.}}</span>
-              {{end}}
-            </div>
-          </div>
-          {{end}}
-          {{if .Incident.Route.Parameters}}
-          <div class="bg-slate-900/60 rounded-lg p-2.5 space-y-1">
-            <span class="text-slate-500 block text-[11px]">Параметры маршрута:</span>
-            <pre class="font-mono text-[11px] text-slate-300 whitespace-pre-wrap select-all">{{jsonPretty .Incident.Route.Parameters}}</pre>
-          </div>
-          {{end}}
-        </div>
-        {{end}}
-
-        <!-- Блок HTTP-запроса -->
-        {{if .Incident.HTTPRequest}}
-        <div class="bg-slate-950 border border-slate-800 rounded-xl p-4 space-y-3">
-          <div class="text-xs font-semibold uppercase tracking-wider text-slate-400 flex items-center justify-between">
-            <div class="flex items-center gap-1.5">
-              <svg class="w-4 h-4 text-emerald-400" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 12a9 9 0 01-9 9m9-9a9 9 0 00-9-9m9 9H3m9 9a9 9 0 01-9-9m9 9c1.657 0 3-4.03 3-9s-1.343-9-3-9m0 18c-1.657 0-3-4.03-3-9s1.343-9 3-9m-9 9a9 9 0 019-9"/></svg>
-              HTTP-запрос (Request)
-            </div>
-            {{if .Incident.HTTPRequest.ClientIP}}
-            <span class="text-[11px] font-mono text-slate-400">IP: <strong class="text-white select-all">{{.Incident.HTTPRequest.ClientIP}}</strong></span>
-            {{end}}
-          </div>
-
-          <!-- URL и Метод -->
-          <div class="bg-slate-900/60 rounded-lg p-3 flex items-center gap-2.5 flex-wrap">
-            <span class="px-2 py-0.5 rounded text-xs font-bold font-mono 
-              {{if eq .Incident.HTTPRequest.Method "GET"}}bg-blue-500/20 text-blue-300 border border-blue-500/30
-              {{else if eq .Incident.HTTPRequest.Method "POST"}}bg-emerald-500/20 text-emerald-300 border border-emerald-500/30
-              {{else if eq .Incident.HTTPRequest.Method "PUT"}}bg-amber-500/20 text-amber-300 border border-amber-500/30
-              {{else if eq .Incident.HTTPRequest.Method "DELETE"}}bg-rose-500/20 text-rose-300 border border-rose-500/30
-              {{else}}bg-slate-800 text-slate-300{{end}}">
-              {{if .Incident.HTTPRequest.Method}}{{.Incident.HTTPRequest.Method}}{{else}}HTTP{{end}}
-            </span>
-            <span class="font-mono text-xs text-slate-200 select-all break-all flex-1">{{if .Incident.HTTPRequest.URL}}{{.Incident.HTTPRequest.URL}}{{else}}{{.Incident.RequestURL}}{{end}}</span>
-          </div>
-
-          <!-- Query params -->
-          {{if .Incident.HTTPRequest.QueryParams}}
-          <div class="bg-slate-900/60 rounded-lg p-3 space-y-1">
-            <span class="text-slate-500 block text-[11px] font-medium">Query Parameters:</span>
-            <pre class="font-mono text-[11px] text-slate-300 whitespace-pre-wrap select-all">{{jsonPretty .Incident.HTTPRequest.QueryParams}}</pre>
-          </div>
-          {{end}}
-
-          <!-- Headers -->
-          {{if .Incident.HTTPRequest.Headers}}
-          <details class="bg-slate-900/60 rounded-lg p-3 group">
-            <summary class="text-slate-400 hover:text-slate-200 cursor-pointer text-xs font-medium flex items-center justify-between select-none">
-              <span>HTTP Заголовки (Headers)</span>
-              <span class="text-[11px] text-slate-500 font-mono">{{len .Incident.HTTPRequest.Headers}} заголовков</span>
-            </summary>
-            <div class="mt-3 pt-3 border-t border-slate-800/80 space-y-1 font-mono text-[11px]">
-              {{range $k, $v := .Incident.HTTPRequest.Headers}}
-              <div class="flex items-start gap-2 py-0.5">
-                <span class="text-slate-500 w-36 shrink-0 select-all">{{$k}}:</span>
-                <span class="text-slate-300 break-all select-all flex-1">{{$v}}</span>
-              </div>
-              {{end}}
-            </div>
-          </details>
-          {{end}}
-
-          <!-- Body -->
-          {{if .Incident.HTTPRequest.Body}}
-          <div class="bg-slate-900/60 rounded-lg p-3 space-y-2">
-            <div class="flex items-center justify-between">
-              <span class="text-slate-400 text-xs font-medium">Тело запроса (Body)</span>
-              <span class="text-[10px] text-emerald-400/90 font-mono px-1.5 py-0.2 rounded bg-emerald-500/10 border border-emerald-500/20">PII Filtered</span>
-            </div>
-            <pre class="font-mono text-[11px] text-slate-200 bg-slate-950 p-3 rounded-lg border border-slate-800/80 whitespace-pre-wrap select-all max-h-64 overflow-y-auto">{{jsonPretty .Incident.HTTPRequest.Body}}</pre>
-          </div>
-          {{end}}
-        </div>
-        {{end}}
-      {{end}}
-
-      <!-- Блок Очереди (Queue Job) -->
-      {{if or .Incident.QueueJob (eq .Incident.ExecutionType "queue")}}
-      <div class="bg-slate-950 border border-slate-800 rounded-xl p-4 space-y-3">
-        <div class="text-xs font-semibold uppercase tracking-wider text-amber-400 flex items-center gap-1.5">
-          <svg class="w-4 h-4 text-amber-400" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 11H5m14 0a2 2 0 012 2v6a2 2 0 01-2 2H5a2 2 0 01-2-2v-6a2 2 0 012-2m14 0V9a2 2 0 00-2-2M5 11V9a2 2 0 012-2m0 0V5a2 2 0 012-2h6a2 2 0 012 2v2M7 7h10"/></svg>
-          Контекст фоновой задачи (Queue Job)
-        </div>
-        {{if .Incident.QueueJob}}
-        <div class="grid grid-cols-1 sm:grid-cols-2 gap-3">
-          <div class="bg-slate-900/60 rounded-lg p-2.5 col-span-full">
-            <span class="text-slate-500 block text-[11px] mb-0.5">Класс задачи (Job Name)</span>
-            <span class="font-mono text-amber-300 font-semibold select-all break-all">{{.Incident.QueueJob.JobName}}</span>
-          </div>
-          <div class="bg-slate-900/60 rounded-lg p-2.5">
-            <span class="text-slate-500 block text-[11px] mb-0.5">Имя очереди (Queue)</span>
-            <span class="font-mono text-white select-all">{{if .Incident.QueueJob.Queue}}{{.Incident.QueueJob.Queue}}{{else}}default{{end}}</span>
-          </div>
-          <div class="bg-slate-900/60 rounded-lg p-2.5">
-            <span class="text-slate-500 block text-[11px] mb-0.5">Соединение (Connection)</span>
-            <span class="font-mono text-slate-300 select-all">{{if .Incident.QueueJob.Connection}}{{.Incident.QueueJob.Connection}}{{else}}sync{{end}}</span>
-          </div>
-          <div class="bg-slate-900/60 rounded-lg p-2.5">
-            <span class="text-slate-500 block text-[11px] mb-0.5">Текущая попытка / Лимит</span>
-            <span class="font-mono text-slate-200">
-              Попытка: <strong class="text-rose-400">{{.Incident.QueueJob.Attempts}}</strong>
-              {{if .Incident.QueueJob.MaxTries}} из {{.Incident.QueueJob.MaxTries}}{{end}}
-            </span>
-          </div>
-          {{if gt .Incident.QueueJob.Timeout 0}}
-          <div class="bg-slate-900/60 rounded-lg p-2.5">
-            <span class="text-slate-500 block text-[11px] mb-0.5">Таймаут выполнения</span>
-            <span class="font-mono text-slate-200">{{.Incident.QueueJob.Timeout}} сек.</span>
-          </div>
-          {{end}}
         </div>
         {{else}}
-        <div class="text-slate-400 bg-slate-900/40 p-3 rounded-lg">Событие выполнено в контексте очереди (Queue Worker), но детальный снимок параметров джобы не передан.</div>
+        <div class="note-dashed">Клиент не прислал стек вызовов.</div>
+        {{end}}
+      </section>
+    </div>
+
+    <div role="tabpanel" id="panel-context" aria-labelledby="tab-context" class="dpanel" hidden>
+      {{with $inc.AppContext}}
+        {{with .Exception}}{{template "ctx-block" (dict "Title" "Контекст исключения" "Sub" "Exception::context()" "Data" .)}}{{end}}
+        {{with .Shared}}{{template "ctx-block" (dict "Title" "Общий контекст" "Sub" "Laravel Context" "Data" .)}}{{end}}
+      {{end}}
+      {{if not (and $inc.AppContext (or $inc.AppContext.Exception $inc.AppContext.Shared))}}
+      <p class="note-dashed">Приложение не передало свой контекст. Данные из <a href="https://laravel.com/docs/context" target="_blank" rel="noopener" class="h-link" style="text-decoration: none">Laravel Context</a> и метода <code class="mono" style="font-size: 12px; color: var(--text-2)">context()</code> исключения появятся здесь.</p>
+      {{end}}
+
+      {{if or $inc.HTTPRequest $inc.RequestURL $inc.Route $inc.QueueJob (eq $inc.ExecutionType "queue") (eq $inc.ExecutionType "console")}}
+      <div class="kv-card">
+        {{if or $inc.HTTPRequest $inc.RequestURL}}
+        <h3 class="kv-title">HTTP-запрос</h3>
+        <dl class="kv">
+          <div class="kv-row"><dt>Запрос</dt><dd>{{with $inc.HTTPRequest}}{{if .Method}}{{.Method}} {{end}}{{if .URL}}{{.URL}}{{else}}{{$inc.RequestURL}}{{end}}{{else}}{{$inc.RequestURL}}{{end}}</dd></div>
+          {{with $inc.HTTPRequest}}
+          <div class="kv-row"><dt>IP клиента</dt><dd>{{if .ClientIP}}{{.ClientIP}}{{else}}—{{end}}</dd></div>
+          {{with .QueryParams}}<div class="kv-row"><dt>Параметры</dt><dd>{{jsonPretty .}}</dd></div>{{end}}
+          {{end}}
+        </dl>
+        {{with $inc.HTTPRequest}}
+        {{with .Headers}}
+        <details class="kv-details">
+          <summary class="h-group"><svg class="chev" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M9 5l7 7-7 7"/></svg>Заголовки<span class="kv-count">{{len .}}</span></summary>
+          <dl class="kv">{{range $k, $v := .}}<div class="kv-row"><dt class="mono">{{$k}}</dt><dd{{if eq $v "[FILTERED]"}} class="is-filtered"{{end}}>{{$v}}</dd></div>{{end}}</dl>
+        </details>
+        {{end}}
+        {{with .Body}}
+        <details class="kv-details">
+          <summary class="h-group"><svg class="chev" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M9 5l7 7-7 7"/></svg>Тело<span class="kv-count">{{len .}}</span></summary>
+          <pre class="kv-pre mono">{{jsonPretty .}}</pre>
+        </details>
+        {{end}}
+        {{end}}
+        {{end}}
+
+        {{with $inc.Route}}
+        <h3 class="kv-title">Маршрут</h3>
+        <dl class="kv">
+          <div class="kv-row"><dt>Имя</dt><dd>{{if .Name}}{{.Name}}{{else}}—{{end}}</dd></div>
+          <div class="kv-row"><dt>Действие</dt><dd>{{if .Action}}{{.Action}}{{else}}—{{end}}</dd></div>
+          {{with .Middleware}}<div class="kv-row"><dt>Middleware</dt><dd>{{join . ", "}}</dd></div>{{end}}
+          {{with .Parameters}}<div class="kv-row"><dt>Параметры</dt><dd>{{jsonPretty .}}</dd></div>{{end}}
+        </dl>
+        {{end}}
+
+        {{if or $inc.QueueJob (eq $inc.ExecutionType "queue")}}
+        <h3 class="kv-title">Задача в очереди</h3>
+        <dl class="kv">
+          {{with $inc.QueueJob}}
+          <div class="kv-row"><dt>Класс задачи</dt><dd>{{if .JobName}}{{.JobName}}{{else}}—{{end}}</dd></div>
+          <div class="kv-row"><dt>Очередь</dt><dd>{{if .Queue}}{{.Queue}}{{else}}default{{end}}</dd></div>
+          <div class="kv-row"><dt>Соединение</dt><dd>{{if .Connection}}{{.Connection}}{{else}}—{{end}}</dd></div>
+          <div class="kv-row"><dt>Попытка</dt><dd>{{.Attempts}}{{with .MaxTries}} из {{.}}{{end}}</dd></div>
+          {{if gt .Timeout 0}}<div class="kv-row"><dt>Таймаут</dt><dd>{{.Timeout}} с</dd></div>{{end}}
+          {{else}}
+          <div class="kv-row"><dt>Задача</dt><dd>Клиент не прислал данные задачи</dd></div>
+          {{end}}
+        </dl>
+        {{end}}
+
+        {{if eq $inc.ExecutionType "console"}}
+        <h3 class="kv-title">Команда</h3>
+        <dl class="kv">
+          <div class="kv-row"><dt>Команда</dt><dd>{{with $inc.Execution}}{{if .Command}}php artisan {{.Command}}{{else}}—{{end}}{{else}}—{{end}}</dd></div>
+        </dl>
         {{end}}
       </div>
       {{end}}
-
-      <!-- Блок Artisan / CLI -->
-      {{if eq .Incident.ExecutionType "console"}}
-      <div class="bg-slate-950 border border-slate-800 rounded-xl p-4 space-y-2">
-        <div class="text-xs font-semibold uppercase tracking-wider text-slate-400 flex items-center gap-1.5">
-          <svg class="w-4 h-4 text-slate-400" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 9l3 3-3 3m5 0h3M5 20h14a2 2 0 002-2V6a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z"/></svg>
-          Artisan / CLI Команда
-        </div>
-        <div class="bg-slate-900/60 rounded-lg p-3 font-mono text-slate-200 select-all break-all">
-          {{if and .Incident.Execution .Incident.Execution.Command}}{{.Incident.Execution.Command}}{{else}}artisan [command]{{end}}
-        </div>
-      </div>
-      {{end}}
-
-      {{if and (not .Incident.Route) (not .Incident.HTTPRequest) (not .Incident.QueueJob) (ne .Incident.ExecutionType "console") (ne .Incident.ExecutionType "queue")}}
-      <div class="p-8 text-center text-slate-500 text-xs bg-slate-950 border border-slate-800 rounded-xl space-y-2">
-        <svg class="w-8 h-8 mx-auto text-slate-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"></path>
-        </svg>
-        <div class="text-slate-400 font-medium">Контекст запроса и очередей не был зафиксирован</div>
-        <div class="text-slate-600">Передавайте блоки route, http_request или execution в клиенте для детального анализа источника ошибки.</div>
-      </div>
-      {{end}}
     </div>
 
-    <!-- ==================== ВКЛАДКА 4: СИСТЕМА И ОКРУЖЕНИЕ ==================== -->
-    <div id="tab-content-system" class="hidden space-y-5 text-xs">
-      {{if .Incident.System}}
-      <!-- Карточки производительности памяти и времени -->
-      <div class="grid grid-cols-1 sm:grid-cols-3 gap-3">
-        <div class="bg-slate-950 border border-slate-800 rounded-xl p-3.5 space-y-1">
-          <span class="text-slate-500 block text-[11px]">Пиковая память (Peak)</span>
-          <div class="font-mono text-base font-bold text-amber-300">
-            {{if gt .Incident.System.MemoryPeakBytes 0}}{{formatBytes .Incident.System.MemoryPeakBytes}}{{else}}—{{end}}
-          </div>
-          <span class="text-[10px] text-slate-600 font-mono">{{.Incident.System.MemoryPeakBytes}} байт</span>
-        </div>
-
-        <div class="bg-slate-950 border border-slate-800 rounded-xl p-3.5 space-y-1">
-          <span class="text-slate-500 block text-[11px]">Выделенная память</span>
-          <div class="font-mono text-base font-bold text-slate-200">
-            {{if gt .Incident.System.MemoryUsageBytes 0}}{{formatBytes .Incident.System.MemoryUsageBytes}}{{else}}—{{end}}
-          </div>
-          <span class="text-[10px] text-slate-600 font-mono">{{.Incident.System.MemoryUsageBytes}} байт</span>
-        </div>
-
-        <div class="bg-slate-950 border border-slate-800 rounded-xl p-3.5 space-y-1">
-          <span class="text-slate-500 block text-[11px]">Время до ошибки</span>
-          <div class="font-mono text-base font-bold text-rose-400">
-            {{if gt .Incident.System.DurationMS 0.0}}{{formatDuration .Incident.System.DurationMS}}{{else}}—{{end}}
-          </div>
-          <span class="text-[10px] text-slate-600 font-mono">LARAVEL_START → throw</span>
-        </div>
-      </div>
-
-      <!-- Системные метаданные -->
-      <div class="bg-slate-950 border border-slate-800 rounded-xl p-4 space-y-3">
-        <div class="text-xs font-semibold uppercase tracking-wider text-slate-400">Среда выполнения и Хост</div>
-        <div class="grid grid-cols-1 sm:grid-cols-2 gap-3 font-mono">
-          <div class="bg-slate-900/60 rounded-lg p-2.5">
-            <span class="text-slate-500 block text-[11px] mb-0.5 font-sans">Версия PHP</span>
-            <span class="text-blue-300 font-semibold select-all">{{if .Incident.System.PHPVersion}}{{.Incident.System.PHPVersion}}{{else if .Incident.PHPVersion}}{{.Incident.PHPVersion}}{{else}}—{{end}}</span>
-          </div>
-          <div class="bg-slate-900/60 rounded-lg p-2.5">
-            <span class="text-slate-500 block text-[11px] mb-0.5 font-sans">Версия Laravel</span>
-            <span class="text-rose-300 font-semibold select-all">{{if .Incident.System.LaravelVersion}}{{.Incident.System.LaravelVersion}}{{else if .Incident.LaravelVersion}}{{.Incident.LaravelVersion}}{{else}}—{{end}}</span>
-          </div>
-          <div class="bg-slate-900/60 rounded-lg p-2.5">
-            <span class="text-slate-500 block text-[11px] mb-0.5 font-sans">Server API (SAPI)</span>
-            <span class="text-slate-200 select-all">{{if .Incident.System.SAPI}}{{.Incident.System.SAPI}}{{else}}—{{end}}</span>
-          </div>
-          <div class="bg-slate-900/60 rounded-lg p-2.5">
-            <span class="text-slate-500 block text-[11px] mb-0.5 font-sans">Имя хоста / пода (Hostname)</span>
-            <span class="text-slate-200 select-all break-all">{{if .Incident.System.Hostname}}{{.Incident.System.Hostname}}{{else}}—{{end}}</span>
-          </div>
-          <div class="bg-slate-900/60 rounded-lg p-2.5">
-            <span class="text-slate-500 block text-[11px] mb-0.5 font-sans">Операционная система (OS)</span>
-            <span class="text-slate-200 select-all">{{if .Incident.System.OS}}{{.Incident.System.OS}}{{else}}—{{end}}</span>
-          </div>
-          <div class="bg-slate-900/60 rounded-lg p-2.5">
-            <span class="text-slate-500 block text-[11px] mb-0.5 font-sans">Локаль приложения (Locale)</span>
-            <span class="text-slate-200 select-all">{{if .Incident.System.Locale}}{{.Incident.System.Locale}}{{else}}—{{end}}</span>
-          </div>
-        </div>
-      </div>
-
-      <!-- Кэширование -->
-      <div class="bg-slate-950 border border-slate-800 rounded-xl p-4 space-y-2">
-        <div class="text-xs font-semibold uppercase tracking-wider text-slate-400">Состояние оптимизаций Laravel</div>
-        <div class="grid grid-cols-1 sm:grid-cols-2 gap-3 text-xs">
-          <div class="bg-slate-900/60 rounded-lg p-3 flex items-center justify-between">
-            <span class="text-slate-300">Кэш конфигурации (Config Cached)</span>
-            {{if .Incident.System.ConfigCached}}
-            <span class="px-2 py-0.5 rounded text-[11px] font-semibold bg-emerald-500/20 text-emerald-300 border border-emerald-500/30">Да (Cached)</span>
-            {{else}}
-            <span class="px-2 py-0.5 rounded text-[11px] font-semibold bg-slate-800 text-slate-400 border border-slate-700">Нет</span>
+    <div role="tabpanel" id="panel-breadcrumbs" aria-labelledby="tab-breadcrumbs" class="dpanel" hidden>
+      {{if $inc.Breadcrumbs}}
+      <ol class="crumbs">
+        {{range $inc.Breadcrumbs}}
+        <li class="crumb crumb-{{.Level}}">
+          <span class="crumb-time mono">{{formatTimestamp .Timestamp}}</span>
+          <span class="crumb-rail"><span class="crumb-line"></span><span class="crumb-dot"></span></span>
+          <span class="crumb-body">
+            <span class="crumb-cat">{{if eq .Category "sql"}}SQL-запрос{{else if eq .Category "http"}}HTTP-вызов{{else if eq .Category "log"}}Лог{{else if eq .Category "queue"}}Очередь{{else if eq .Category "cache"}}Кэш{{else}}{{.Category}}{{end}}
+              {{if or (eq .Level "warning") (eq .Level "error")}}<span class="crumb-level">{{.Level}}</span>{{end}}</span>
+            <span class="crumb-msg mono">{{.Message}}</span>
+            {{with .Data}}
+            <details class="kv-details crumb-data">
+              <summary class="h-group"><svg class="chev" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M9 5l7 7-7 7"/></svg>Данные<span class="kv-count">{{len .}}</span></summary>
+              <pre class="kv-pre mono">{{jsonPretty .}}</pre>
+            </details>
             {{end}}
-          </div>
-          <div class="bg-slate-900/60 rounded-lg p-3 flex items-center justify-between">
-            <span class="text-slate-300">Кэш маршрутов (Routes Cached)</span>
-            {{if .Incident.System.RoutesCached}}
-            <span class="px-2 py-0.5 rounded text-[11px] font-semibold bg-emerald-500/20 text-emerald-300 border border-emerald-500/30">Да (Cached)</span>
-            {{else}}
-            <span class="px-2 py-0.5 rounded text-[11px] font-semibold bg-slate-800 text-slate-400 border border-slate-700">Нет</span>
-            {{end}}
-          </div>
-        </div>
-      </div>
+          </span>
+        </li>
+        {{end}}
+        <li class="crumb crumb-final">
+          <span class="crumb-time">ошибка</span>
+          <span class="crumb-rail"><span class="crumb-dot"></span></span>
+          <span class="crumb-msg mono">{{baseName $inc.ExceptionClass}}</span>
+        </li>
+      </ol>
       {{else}}
-      <!-- Базовые системные данные если расширенный объект отсутствует -->
-      <div class="bg-slate-950 border border-slate-800 rounded-xl p-5 space-y-4">
-        <div class="text-xs font-semibold uppercase tracking-wider text-slate-400">Базовые параметры среды</div>
-        <div class="grid grid-cols-1 sm:grid-cols-2 gap-3 font-mono">
-          <div class="bg-slate-900/60 rounded-lg p-3">
-            <span class="text-slate-500 block text-[11px] mb-1 font-sans">PHP Version</span>
-            <span class="text-blue-300 font-bold">{{if .Incident.PHPVersion}}{{.Incident.PHPVersion}}{{else}}Не указана{{end}}</span>
-          </div>
-          <div class="bg-slate-900/60 rounded-lg p-3">
-            <span class="text-slate-500 block text-[11px] mb-1 font-sans">Laravel Version</span>
-            <span class="text-rose-300 font-bold">{{if .Incident.LaravelVersion}}{{.Incident.LaravelVersion}}{{else}}Не указана{{end}}</span>
-          </div>
-          <div class="bg-slate-900/60 rounded-lg p-3 col-span-full">
-            <span class="text-slate-500 block text-[11px] mb-1 font-sans">Хост приложения (App URL)</span>
-            <span class="text-sky-300 break-all">{{if .Incident.AppURL}}{{.Incident.AppURL}}{{else}}Не передан{{end}}</span>
-          </div>
-        </div>
-        <div class="text-[11px] text-slate-500 bg-slate-900/40 p-3 rounded-lg">
-          Подключите сборщик SystemContext в клиенте для автоматического отображения пиковой памяти, времени выполнения и статуса кэша.
-        </div>
+      <div class="empty-dashed">
+        <div style="font-size: 15px; font-weight: 600">Хлебных крошек нет</div>
+        <div style="max-width: 440px; font-size: 13px; line-height: 1.5; color: var(--muted)">Клиент записывает SQL-запросы, HTTP-вызовы и логи, которые были перед ошибкой. Включите breadcrumbs в config/larasentry.php, чтобы они появились здесь.</div>
       </div>
       {{end}}
     </div>
 
-    <!-- Скрипт переключения вкладок -->
-    <script>
-      function switchDetailTab(tabName) {
-        const tabs = ['stack', 'breadcrumbs', 'context', 'request', 'system'];
-        tabs.forEach(t => {
-          const btn = document.getElementById('tab-btn-' + t);
-          const content = document.getElementById('tab-content-' + t);
-          if (!btn || !content) return;
-          if (t === tabName) {
-            btn.className = "px-3.5 py-2 text-xs font-semibold rounded-lg bg-rose-500/15 text-rose-300 border border-rose-500/30 flex items-center gap-1.5 transition";
-            content.classList.remove('hidden');
-          } else {
-            btn.className = "px-3.5 py-2 text-xs font-medium rounded-lg text-slate-400 hover:text-slate-200 hover:bg-slate-800/60 border border-transparent flex items-center gap-1.5 transition";
-            content.classList.add('hidden');
-          }
-        });
-      }
-    </script>
-
-    <!-- Хэш дедупликации -->
-    <div class="pt-4 border-t border-slate-800 flex items-center justify-between text-[11px] text-slate-500 font-mono">
-      <span>Хэш группы: {{.Incident.Hash}}</span>
-      <span>Project ID: {{.Incident.ProjectID}}</span>
+    <div role="tabpanel" id="panel-env" aria-labelledby="tab-env" class="dpanel" hidden>
+      {{$sys := $inc.System}}
+      <dl class="kv-card env">
+        {{template "env-row" (dict "Label" "Окружение" "Value" (or $inc.Environment "production"))}}
+        {{template "env-row" (dict "Label" "PHP" "Value" (or (and $sys $sys.PHPVersion) $inc.PHPVersion))}}
+        {{template "env-row" (dict "Label" "Laravel" "Value" (or (and $sys $sys.LaravelVersion) $inc.LaravelVersion))}}
+        {{template "env-row" (dict "Label" "Сервер приложения" "Value" $inc.AppURL)}}
+        {{with $sys}}
+        {{template "env-row" (dict "Label" "Имя хоста" "Value" .Hostname)}}
+        {{template "env-row" (dict "Label" "ОС" "Value" .OS)}}
+        {{template "env-row" (dict "Label" "SAPI" "Value" .SAPI)}}
+        {{template "env-row" (dict "Label" "Локаль" "Value" .Locale)}}
+        {{if .MemoryPeakBytes}}{{template "env-row" (dict "Label" "Пик памяти" "Value" (formatBytes .MemoryPeakBytes))}}{{end}}
+        {{if .MemoryUsageBytes}}{{template "env-row" (dict "Label" "Память при ошибке" "Value" (formatBytes .MemoryUsageBytes))}}{{end}}
+        {{if .DurationMS}}{{template "env-row" (dict "Label" "Время до ошибки" "Value" (formatDuration .DurationMS))}}{{end}}
+        {{template "env-row" (dict "Label" "Кэш конфигурации" "Value" (yesNo .ConfigCached))}}
+        {{template "env-row" (dict "Label" "Кэш маршрутов" "Value" (yesNo .RoutesCached))}}
+        {{end}}
+        {{with $inc.HTTPRequest}}{{template "env-row" (dict "Label" "IP клиента" "Value" .ClientIP)}}{{end}}
+        {{template "env-row" (dict "Label" "Первый релиз" "Value" $inc.FirstRelease)}}
+        {{template "env-row" (dict "Label" "Хэш группы" "Value" $inc.Hash)}}
+        {{template "env-row" (dict "Label" "Проект" "Value" (printf "%s (ID %d)" (or $inc.ProjectName "Default Project") $inc.ProjectID))}}
+      </dl>
+      {{if not $sys}}<p class="note-dashed" style="margin-top: 12px">Клиент не прислал данные о системе. Подключите сборщик SystemContext, чтобы здесь появились память, время выполнения и состояние кэшей.</p>{{end}}
     </div>
-
   </div>
 </div>
+
+{{define "stack-frame"}}
+<div class="frow h-frame{{if not .Vendor}} is-app{{end}}">
+  <span class="f-n mono">#{{.Index}}</span>
+  <span class="fmethod mono">{{if .Class}}<span class="f-cls">{{.ShortClass}}{{.Sep}}</span>{{end}}<span class="f-m">{{.Method}}</span></span>
+  {{if .File}}
+  <span class="ffile mono" tabindex="0">{{.FileName}}{{if .Line}}:<span class="f-line">{{.Line}}</span>{{end}}</span>
+  <span class="ffull">
+    <span class="ffull-path mono" title="{{.File}}{{if .Line}}:{{.Line}}{{end}}"><bdi>{{.File}}{{if .Line}}:<span style="color: var(--blue)">{{.Line}}</span>{{end}}</bdi></span>
+    {{template "copy-button" (printf "%s:%d" .File .Line)}}
+  </span>
+  {{end}}
+</div>
+{{end}}
+
+{{define "ctx-block"}}
+{{$truncated := index .Data "_truncated"}}
+<section class="ctx-block" aria-label="{{.Title}}">
+  <div class="ctx-head">
+    <h3>{{.Title}}<span class="mono">{{.Sub}}</span></h3>
+    {{if not $truncated}}
+    <span class="ctx-count">{{len .Data}} {{plural (len .Data) "ключ" "ключа" "ключей"}}</span>
+    {{template "copy-button" (jsonPretty .Data)}}
+    {{end}}
+  </div>
+  {{if $truncated}}
+  <div class="callout callout-amber" style="margin: 12px 14px; align-items: flex-start; font-size: 13px; line-height: 1.5">
+    <svg style="margin-top: 2px" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#F0A83A" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z"/></svg>
+    <span>Контекст занял {{ctxValue (index .Data "_size")}} байт — больше лимита клиента, поэтому данные не отправлены. Лимит задаёт LARASENTRY_MAX_CONTEXT_BYTES, по умолчанию 16 384 байт.</span>
+  </div>
+  {{else}}
+  <dl class="kv">
+    {{range $k, $v := .Data}}{{$text := ctxValue $v}}
+    <div class="kv-row"><dt class="mono">{{$k}}</dt><dd class="{{if eq $text "[FILTERED]"}}is-filtered{{end}}">{{$text}}</dd></div>
+    {{end}}
+  </dl>
+  {{end}}
+</section>
+{{end}}
+
+{{define "env-row"}}
+<div class="kv-row env-row">
+  <dt>{{.Label}}</dt>
+  <dd{{if not .Value}} class="is-empty"{{end}}>{{if .Value}}{{.Value}}{{else}}—{{end}}</dd>
+  {{if .Value}}{{template "copy-button" .Value}}{{else}}<span></span>{{end}}
+</div>
+{{end}}

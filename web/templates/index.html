@@ -18,11 +18,6 @@
   .search.htmx-request .search-kbd, .search.htmx-request .search-clear { display: none !important; }
   .search.htmx-request .search-spinner { display: inline-flex; }
 
-  .segments { display: flex; gap: 2px; padding: 3px; border-radius: 8px; border: 1px solid var(--line); background: var(--surface); }
-  .seg { display: flex; align-items: center; gap: 8px; padding: 5px 12px; border-radius: 6px; border: 0; background: transparent; color: var(--muted); font-size: 13px; font-weight: 500; cursor: pointer; }
-  .seg-count { font-variant-numeric: tabular-nums; color: var(--faint); }
-  .seg[aria-pressed=true] { background: var(--raised); color: var(--text); }
-  .seg[aria-pressed=true] .seg-count { color: var(--c); }
 
   .dd { position: relative; }
   .dd-btn { display: flex; align-items: center; justify-content: space-between; gap: 12px; height: 36px; min-width: 150px; padding: 0 12px; border-radius: 6px; border: 1px solid var(--line); background: var(--surface); color: var(--text); font-size: 13px; cursor: pointer; }
@@ -99,9 +94,9 @@
         <svg class="dd-chev" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#8D96A8" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M6 9l6 6 6-6"/></svg>
       </button>
       <div class="dd-list" role="listbox" aria-label="Проект" hidden>
-        {{template "dd-option" (ddOption "0" "Все проекты" (printf "%d %s" .TotalIncidents (plural .TotalIncidents "ошибка" "ошибки" "ошибок")) (eq .SelectedProjectID 0))}}
+        {{template "dd-option" (dict "Value" "0" "Label" "Все проекты" "Hint" (printf "%d %s" .TotalIncidents (plural .TotalIncidents "ошибка" "ошибки" "ошибок")) "Selected" (eq .SelectedProjectID 0))}}
         {{range .Projects}}
-        {{template "dd-option" (ddOption (printf "%d" .ID) .Name (printf "ID %d, %d %s" .ID (index $.ProjectCounts .ID) (plural (index $.ProjectCounts .ID) "ошибка" "ошибки" "ошибок")) (eq .ID $.SelectedProjectID))}}
+        {{template "dd-option" (dict "Value" (printf "%d" .ID) "Label" .Name "Hint" (printf "ID %d, %d %s" .ID (index $.ProjectCounts .ID) (plural (index $.ProjectCounts .ID) "ошибка" "ошибки" "ошибок")) "Selected" (eq .ID $.SelectedProjectID))}}
         {{end}}
       </div>
     </div>
@@ -114,8 +109,8 @@
         <svg class="dd-chev" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#8D96A8" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M6 9l6 6 6-6"/></svg>
       </button>
       <div class="dd-list dd-right" role="listbox" aria-label="Сортировка" hidden>
-        {{template "dd-option" (ddOption "recent" "Сначала новые" "По времени последнего события" (ne .SelectedSort "count"))}}
-        {{template "dd-option" (ddOption "count" "Сначала частые" "По числу событий" (eq .SelectedSort "count"))}}
+        {{template "dd-option" (dict "Value" "recent" "Label" "Сначала новые" "Hint" "По времени последнего события" "Selected" (ne .SelectedSort "count"))}}
+        {{template "dd-option" (dict "Value" "count" "Label" "Сначала частые" "Hint" "По числу событий" "Selected" (eq .SelectedSort "count"))}}
       </div>
     </div>
   </form>

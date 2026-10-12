@@ -152,19 +152,14 @@ func TestHandleIncidentDetail_WithStackTraceFilter(t *testing.T) {
 
 	body := rec.Body.String()
 
-	// Verify buttons and elements are rendered
-	if !strings.Contains(body, "Без vendor") {
-		t.Errorf("expected body to contain 'Без vendor'")
-	}
-	if !strings.Contains(body, "app-stack-trace") {
-		t.Errorf("expected body to contain 'app-stack-trace'")
-	}
-	if !strings.Contains(body, "raw-stack-trace") {
-		t.Errorf("expected body to contain 'raw-stack-trace'")
-	}
-	// Check that filtered trace contains UserController.php and does not contain Connection.php
-	if !strings.Contains(body, "UserController.php(42)") {
-		t.Errorf("expected body to contain UserController.php(42)")
+	for _, want := range []string{
+		`UserController.php:<span class="f-line">42</span>`,
+		"1 кадр из vendor",
+		`<details class="vgroup">`,
+	} {
+		if !strings.Contains(body, want) {
+			t.Errorf("expected app frame and collapsed vendor group, missing %q", want)
+		}
 	}
 }
 
@@ -422,8 +417,8 @@ func TestHandleIncidentDetail_ExtendedContextTabs(t *testing.T) {
 	body := rec.Body.String()
 
 	// 1. Tab buttons
-	if !strings.Contains(body, "tab-btn-stack") || !strings.Contains(body, "tab-btn-breadcrumbs") ||
-		!strings.Contains(body, "tab-btn-request") || !strings.Contains(body, "tab-btn-system") {
+	if !strings.Contains(body, `id="tab-stack"`) || !strings.Contains(body, `id="tab-context"`) ||
+		!strings.Contains(body, `id="tab-breadcrumbs"`) || !strings.Contains(body, `id="tab-env"`) {
 		t.Errorf("expected tab navigation buttons in rendered HTML")
 	}
 
@@ -494,7 +489,7 @@ func TestHandleIncidentDetail_AppContextTab(t *testing.T) {
 		Exception: map[string]any{"_truncated": true, "_size": float64(20000)},
 	}))
 
-	for _, want := range []string{"tab-btn-context", "tab-content-context", "trace_id", "t-1", "Контекст больше лимита (20000 байт)"} {
+	for _, want := range []string{`id="tab-context"`, `id="panel-context"`, "trace_id", "t-1", "Контекст занял 20000 байт"} {
 		if !strings.Contains(body, want) {
 			t.Errorf("expected %q in rendered HTML", want)
 		}
@@ -504,7 +499,7 @@ func TestHandleIncidentDetail_AppContextTab(t *testing.T) {
 func TestHandleIncidentDetail_AppContextEmpty(t *testing.T) {
 	body := renderIncidentDetail(t, newContextIncident(nil))
 
-	if !strings.Contains(body, "Приложение не передало контекст") {
+	if !strings.Contains(body, "Приложение не передало свой контекст") {
 		t.Errorf("expected empty-context placeholder in rendered HTML")
 	}
 }

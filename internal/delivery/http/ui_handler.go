@@ -41,8 +41,18 @@ func NewUIHandler(
 ) (*UIHandler, error) {
 	// Parse all templates from embedded FS with helper functions
 	funcMap := template.FuncMap{
-		"trim":         strings.TrimSpace,
-		"filterVendor": domain.FilterVendorStackTrace,
+		"trim":     strings.TrimSpace,
+		"join":     strings.Join,
+		"ctxValue": ctxValue,
+		"yesNo": func(b *bool) string {
+			if b == nil {
+				return "—"
+			}
+			if *b {
+				return "Да"
+			}
+			return "Нет"
+		},
 		"host": func(rawURL string) string {
 			rawURL = strings.TrimSpace(rawURL)
 			if rawURL == "" {
@@ -66,9 +76,7 @@ func NewUIHandler(
 		},
 		"baseName": baseName,
 		"plural":   plural,
-		"ddOption": func(value, label, hint string, selected bool) map[string]any {
-			return map[string]any{"Value": value, "Label": label, "Hint": hint, "Selected": selected}
-		},
+		"dict":     dict,
 		"namespace": func(s string) string {
 			return strings.TrimSuffix(s, baseName(s))
 		},
@@ -96,20 +104,7 @@ func NewUIHandler(
 			}
 			return fmt.Sprintf("%.2f s", ms/1000)
 		},
-		"jsonPretty": func(v any) string {
-			if v == nil {
-				return ""
-			}
-			var buf bytes.Buffer
-			enc := json.NewEncoder(&buf)
-			// html/template экранирует вывод сам; иначе & в URL показывается как &
-			enc.SetEscapeHTML(false)
-			enc.SetIndent("", "  ")
-			if err := enc.Encode(v); err != nil {
-				return fmt.Sprintf("%v", v)
-			}
-			return strings.TrimSuffix(buf.String(), "\n")
-		},
+		"jsonPretty": jsonPretty,
 		"formatTimestamp": func(ts float64) string {
 			if ts <= 0 {
 				return ""
@@ -335,14 +330,24 @@ func (h *UIHandler) HandleIncidentDetail(w http.ResponseWriter, r *http.Request)
 		issueURL = github.BuildIssueURL(project.GitHubRepo, title, body)
 	}
 
+	frames := domain.ParseFrames(incident.StackTrace)
+	vendorFrames := 0
+	for _, f := range frames {
+		if f.Vendor {
+			vendorFrames++
+		}
+	}
+
 	data := map[string]interface{}{
 		"Incident":      incident,
 		"Project":       project,
 		"CodeSnippet":   codeSnippet,
 		"IssueURL":      issueURL,
 		"LatestRelease": latestRelease,
-		"AppStackTrace": incident.AppStackTrace(),
-		"Stats":         incident.StackTraceStats(),
+		"StackGroups":   domain.GroupFrames(frames),
+		"CallGraph":     domain.BuildCallGraph(frames),
+		"VendorFrames":  vendorFrames,
+		"SnippetNote":   snippetNote(incident, frames),
 	}
 
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
@@ -466,4 +471,66 @@ func parseIncidentState(r *http.Request) (domain.IncidentState, error) {
 		state.ResolvedAt = &t
 	}
 	return state, nil
+}
+
+// snippetNote explains why the "Место ошибки" block has no source code.
+func snippetNote(inc *domain.Incident, frames []domain.StackFrame) string {
+	if strings.Contains(inc.File, "eval()'d code") {
+		return "Код выполнен в tinker через eval(), исходного файла нет."
+	}
+	if domain.IsVendorTraceLine(inc.File) {
+		for _, f := range frames {
+			if !f.Vendor && f.Line > 0 {
+				return fmt.Sprintf("Ошибка возникла внутри vendor. Ближайший кадр вашего кода: %s:%d.", f.FileName(), f.Line)
+			}
+		}
+		return "Ошибка возникла внутри vendor, кадров вашего кода в стеке нет."
+	}
+	return "Исходный код недоступен: клиент не прислал фрагмент, а репозиторий GitHub для проекта не привязан."
+}
+
+// ctxValue renders an application context value: strings as is, everything else as indented JSON.
+func ctxValue(v any) string {
+	switch val := v.(type) {
+	case nil:
+		return "null"
+	case string:
+		return val
+	case map[string]any, []any:
+		return jsonPretty(val)
+	default:
+		return fmt.Sprint(val)
+	}
+}
+
+// jsonPretty renders v as JSON indented by two spaces.
+func jsonPretty(v any) string {
+	if v == nil {
+		return ""
+	}
+	var buf bytes.Buffer
+	enc := json.NewEncoder(&buf)
+	// html/template экранирует вывод сам; иначе & в URL показывается как &
+	enc.SetEscapeHTML(false)
+	enc.SetIndent("", "  ")
+	if err := enc.Encode(v); err != nil {
+		return fmt.Sprintf("%v", v)
+	}
+	return strings.TrimSuffix(buf.String(), "\n")
+}
+
+// dict builds a map from key/value pairs to pass several values into a nested template.
+func dict(pairs ...any) (map[string]any, error) {
+	if len(pairs)%2 != 0 {
+		return nil, errors.New("dict: odd number of arguments")
+	}
+	m := make(map[string]any, len(pairs)/2)
+	for i := 0; i < len(pairs); i += 2 {
+		key, ok := pairs[i].(string)
+		if !ok {
+			return nil, fmt.Errorf("dict: key %v is not a string", pairs[i])
+		}
+		m[key] = pairs[i+1]
+	}
+	return m, nil
 }
