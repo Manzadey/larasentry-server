@@ -97,8 +97,8 @@ func TestHandleEvent_Success(t *testing.T) {
 	}
 }
 
-func TestHandleEvent_Unauthorized(t *testing.T) {
-	handler, _, _ := setupTestAPIHandler(t)
+func TestHandleEvent_NoToken_AutoResolvesDefaultProject(t *testing.T) {
+	handler, eventChan, _ := setupTestAPIHandler(t)
 
 	payload := domain.EventPayload{
 		ExceptionClass: "RuntimeException",
@@ -106,12 +106,75 @@ func TestHandleEvent_Unauthorized(t *testing.T) {
 	}
 	body, _ := json.Marshal(payload)
 
-	// Missing header
+	// Missing header / token - should succeed and auto-resolve
 	req := httptest.NewRequest(http.MethodPost, "/api/events", bytes.NewReader(body))
 	rec := httptest.NewRecorder()
 	handler.HandleEvent(rec, req)
-	if rec.Code != http.StatusUnauthorized {
-		t.Errorf("expected 401 Unauthorized for missing token, got %d", rec.Code)
+	if rec.Code != http.StatusAccepted {
+		t.Errorf("expected 202 Accepted for missing token, got %d: %s", rec.Code, rec.Body.String())
+	}
+
+	select {
+	case event := <-eventChan:
+		if event.ProjectName != "Default Project" {
+			t.Errorf("expected Default Project, got %s", event.ProjectName)
+		}
+	default:
+		t.Errorf("expected event in eventChan")
+	}
+}
+
+func TestHandleEvent_WithProjectNameInPayload(t *testing.T) {
+	handler, eventChan, _ := setupTestAPIHandler(t)
+
+	payload := domain.EventPayload{
+		Project:        "shop-backend",
+		ExceptionClass: "QueryException",
+		Message:        "Table not found",
+	}
+	body, _ := json.Marshal(payload)
+
+	req := httptest.NewRequest(http.MethodPost, "/api/events", bytes.NewReader(body))
+	rec := httptest.NewRecorder()
+	handler.HandleEvent(rec, req)
+	if rec.Code != http.StatusAccepted {
+		t.Errorf("expected 202 Accepted, got %d: %s", rec.Code, rec.Body.String())
+	}
+
+	select {
+	case event := <-eventChan:
+		if event.ProjectName != "shop-backend" {
+			t.Errorf("expected shop-backend, got %s", event.ProjectName)
+		}
+	default:
+		t.Errorf("expected event in eventChan")
+	}
+}
+
+func TestHandleEvent_WithProjectNameInHeader(t *testing.T) {
+	handler, eventChan, _ := setupTestAPIHandler(t)
+
+	payload := domain.EventPayload{
+		ExceptionClass: "LogicException",
+		Message:        "Bad state",
+	}
+	body, _ := json.Marshal(payload)
+
+	req := httptest.NewRequest(http.MethodPost, "/api/events", bytes.NewReader(body))
+	req.Header.Set("X-Project", "crm-system")
+	rec := httptest.NewRecorder()
+	handler.HandleEvent(rec, req)
+	if rec.Code != http.StatusAccepted {
+		t.Errorf("expected 202 Accepted, got %d: %s", rec.Code, rec.Body.String())
+	}
+
+	select {
+	case event := <-eventChan:
+		if event.ProjectName != "crm-system" {
+			t.Errorf("expected crm-system, got %s", event.ProjectName)
+		}
+	default:
+		t.Errorf("expected event in eventChan")
 	}
 }
 

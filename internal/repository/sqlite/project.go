@@ -3,6 +3,10 @@ package sqlite
 import (
 	"context"
 	"database/sql"
+	"strings"
+
+	"github.com/google/uuid"
+
 	"server/internal/domain"
 )
 
@@ -34,6 +38,59 @@ func (r *ProjectRepo) GetByKey(ctx context.Context, apiKey string) (*domain.Proj
 		return nil, err
 	}
 	return &p, nil
+}
+
+func (r *ProjectRepo) GetByName(ctx context.Context, name string) (*domain.Project, error) {
+	name = strings.TrimSpace(name)
+	var p domain.Project
+	err := r.db.QueryRowContext(ctx, `
+		SELECT id, name, api_key, 
+		       COALESCE(github_repo, ''), 
+		       COALESCE(github_token, ''), 
+		       COALESCE(github_branch, 'main'), 
+		       COALESCE(path_prefix, '') 
+		FROM projects WHERE LOWER(name) = LOWER(?) LIMIT 1
+	`, name).Scan(&p.ID, &p.Name, &p.APIKey, &p.GitHubRepo, &p.GitHubToken, &p.GitHubBranch, &p.PathPrefix)
+	if err != nil {
+		return nil, err
+	}
+	return &p, nil
+}
+
+func (r *ProjectRepo) GetOrCreateByName(ctx context.Context, name string) (*domain.Project, error) {
+	name = strings.TrimSpace(name)
+	if name == "" {
+		name = "Default Project"
+	}
+
+	p, err := r.GetByName(ctx, name)
+	if err == nil && p != nil {
+		return p, nil
+	}
+
+	apiKey := uuid.New().String()
+	res, err := r.db.ExecContext(ctx, `
+		INSERT INTO projects (name, api_key) VALUES (?, ?)
+	`, name, apiKey)
+	if err != nil {
+		pRetry, errRetry := r.GetByName(ctx, name)
+		if errRetry == nil && pRetry != nil {
+			return pRetry, nil
+		}
+		return nil, err
+	}
+
+	id, err := res.LastInsertId()
+	if err != nil {
+		return nil, err
+	}
+
+	return &domain.Project{
+		ID:           id,
+		Name:         name,
+		APIKey:       apiKey,
+		GitHubBranch: "main",
+	}, nil
 }
 
 func (r *ProjectRepo) GetByID(ctx context.Context, id int64) (*domain.Project, error) {

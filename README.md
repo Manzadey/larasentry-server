@@ -34,12 +34,17 @@ The SQLite database will be persisted in the `./data` directory on your host mac
 ### 1. Receive Error (POST)
 `POST /api/events`
 
-Used by the Laravel client to push errors. Requires `Authorization: Bearer <API_KEY>`.
+Used by Laravel clients to push errors. API-ключи не требуются — проект регистрируется и определяется автоматически:
+- В теле запроса: `"project": "my-app"` (или `"project_name"`)
+- Либо через заголовок: `X-Project: my-app`
+- Либо через query-параметр: `?project=my-app`
+- Если имя не передано, событие сохраняется в `Default Project`.
+*(Для обратной совместимости также поддерживается `Authorization: Bearer <API_KEY>`)*.
 
 ### 2. List Errors (GET)
 `GET /api/incidents`
 
-Returns a JSON array of the latest errors for a specific project. Requires `Authorization: Bearer <API_KEY>`.
+Возвращает список инцидентов. Поддерживает фильтрацию по проекту: `?project=my-app` или `?project_id=1`. Без параметров возвращает инциденты всех проектов.
 
 ## CI/CD и автодеплой (GitHub Actions)
 

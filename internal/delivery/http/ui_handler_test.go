@@ -20,6 +20,18 @@ func (m *mockProjectRepo) GetIDByKey(ctx context.Context, apiKey string) (int64,
 func (m *mockProjectRepo) GetByKey(ctx context.Context, apiKey string) (*domain.Project, error) {
 	return &domain.Project{ID: 1, Name: "Test Project", APIKey: "test-key"}, nil
 }
+func (m *mockProjectRepo) GetByName(ctx context.Context, name string) (*domain.Project, error) {
+	if name == "" {
+		name = "Default Project"
+	}
+	return &domain.Project{ID: 1, Name: name, APIKey: "test-key"}, nil
+}
+func (m *mockProjectRepo) GetOrCreateByName(ctx context.Context, name string) (*domain.Project, error) {
+	if name == "" {
+		name = "Default Project"
+	}
+	return &domain.Project{ID: 1, Name: name, APIKey: "test-key"}, nil
+}
 func (m *mockProjectRepo) GetAllProjects(ctx context.Context) ([]domain.Project, error) {
 	return []domain.Project{{ID: 1, Name: "Test Project"}}, nil
 }

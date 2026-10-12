@@ -22,6 +22,8 @@ type UserContext struct {
 
 // EventPayload represents the incoming JSON from Laravel
 type EventPayload struct {
+	Project        string            `json:"project,omitempty"`
+	ProjectName    string            `json:"project_name,omitempty"`
 	Release        string            `json:"release"`
 	Environment    string            `json:"environment"`
 	ExceptionClass string            `json:"exception_class"`
@@ -164,6 +166,7 @@ type BatchIncidentsRequest struct {
 
 // CreateReleaseRequest represents parameters for registering a release from CI/CD
 type CreateReleaseRequest struct {
+	Project string `json:"project,omitempty"`
 	Version string `json:"version"`
 	Ref     string `json:"ref,omitempty"`
 	Commit  string `json:"commit,omitempty"`
@@ -210,6 +213,8 @@ type UpsertResult struct {
 type ProjectRepository interface {
 	GetIDByKey(ctx context.Context, apiKey string) (int64, error)
 	GetByKey(ctx context.Context, apiKey string) (*Project, error)
+	GetByName(ctx context.Context, name string) (*Project, error)
+	GetOrCreateByName(ctx context.Context, name string) (*Project, error)
 	GetByID(ctx context.Context, id int64) (*Project, error)
 	GetAllProjects(ctx context.Context) ([]Project, error)
 	UpdateGitHubSettings(ctx context.Context, id int64, repo, token, branch, pathPrefix string) error

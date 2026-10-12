@@ -77,26 +77,64 @@ func (h *APIHandler) checkIPAllowed(r *http.Request) bool {
 	return false
 }
 
-func (h *APIHandler) authenticate(r *http.Request) (*domain.Project, error) {
+func (h *APIHandler) resolveProject(r *http.Request, explicitName string) (*domain.Project, error) {
+	ctx := r.Context()
+	projectName := strings.TrimSpace(explicitName)
+
+	if projectName == "" {
+		for _, hdr := range []string{"X-Project", "X-Project-Name", "X-App-Name"} {
+			if val := strings.TrimSpace(r.Header.Get(hdr)); val != "" {
+				projectName = val
+				break
+			}
+		}
+	}
+
+	if projectName == "" {
+		for _, qParam := range []string{"project", "project_name", "app"} {
+			if val := strings.TrimSpace(r.URL.Query().Get(qParam)); val != "" {
+				projectName = val
+				break
+			}
+		}
+	}
+
+	if projectName == "" {
+		if pidStr := strings.TrimSpace(r.URL.Query().Get("project_id")); pidStr != "" {
+			if pid, err := strconv.ParseInt(pidStr, 10, 64); err == nil && pid > 0 {
+				p, err := h.projectRepo.GetByID(ctx, pid)
+				if err == nil && p != nil {
+					return p, nil
+				}
+			}
+		}
+	}
+
+	// Backwards compatibility for Bearer tokens or query param token
 	authHeader := r.Header.Get("Authorization")
 	var apiKey string
 	if authHeader != "" && strings.HasPrefix(authHeader, "Bearer ") {
 		apiKey = strings.TrimPrefix(authHeader, "Bearer ")
 	} else {
-		// Fallback for EventSource query param authentication
 		apiKey = r.URL.Query().Get("token")
 	}
-
 	apiKey = strings.TrimSpace(apiKey)
-	if apiKey == "" {
-		return nil, fmt.Errorf("missing authorization token")
+	if apiKey != "" {
+		p, err := h.projectRepo.GetByKey(ctx, apiKey)
+		if err == nil && p != nil {
+			return p, nil
+		}
 	}
 
-	project, err := h.projectRepo.GetByKey(r.Context(), apiKey)
-	if err != nil || project == nil {
-		return nil, fmt.Errorf("invalid API key")
+	if projectName != "" {
+		return h.projectRepo.GetOrCreateByName(ctx, projectName)
 	}
-	return project, nil
+
+	return h.projectRepo.GetOrCreateByName(ctx, "Default Project")
+}
+
+func (h *APIHandler) authenticate(r *http.Request) (*domain.Project, error) {
+	return h.resolveProject(r, "")
 }
 
 func writeJSON(w http.ResponseWriter, status int, data any) {
@@ -140,15 +178,27 @@ func (h *APIHandler) HandleEvent(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	project, err := h.authenticate(r)
-	if err != nil {
-		writeError(w, http.StatusUnauthorized, "Unauthorized - "+err.Error())
-		return
-	}
-
 	var payload domain.EventPayload
 	if err := json.NewDecoder(r.Body).Decode(&payload); err != nil {
 		writeError(w, http.StatusBadRequest, "Bad Request - Invalid JSON")
+		return
+	}
+
+	projName := payload.Project
+	if projName == "" {
+		projName = payload.ProjectName
+	}
+	if projName == "" && payload.Tags != nil {
+		if val, ok := payload.Tags["project"]; ok {
+			projName = val
+		} else if val, ok := payload.Tags["project_name"]; ok {
+			projName = val
+		}
+	}
+
+	project, err := h.resolveProject(r, projName)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "Failed to resolve project: "+err.Error())
 		return
 	}
 
@@ -206,17 +256,18 @@ func (h *APIHandler) HandleBatchEvents(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	project, err := h.authenticate(r)
-	if err != nil {
-		writeError(w, http.StatusUnauthorized, "Unauthorized - "+err.Error())
-		return
-	}
-
 	var req struct {
-		Events []domain.EventPayload `json:"events"`
+		Project string                `json:"project"`
+		Events  []domain.EventPayload `json:"events"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		writeError(w, http.StatusBadRequest, "Bad Request - Invalid JSON")
+		return
+	}
+
+	defaultBatchProject, err := h.resolveProject(r, req.Project)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "Failed to resolve project: "+err.Error())
 		return
 	}
 
@@ -231,6 +282,17 @@ func (h *APIHandler) HandleBatchEvents(w http.ResponseWriter, r *http.Request) {
 
 	acceptedCount := 0
 	for _, payload := range req.Events {
+		eventProj := defaultBatchProject
+		eventProjName := payload.Project
+		if eventProjName == "" {
+			eventProjName = payload.ProjectName
+		}
+		if eventProjName != "" && eventProjName != defaultBatchProject.Name {
+			if resolved, err := h.resolveProject(r, eventProjName); err == nil && resolved != nil {
+				eventProj = resolved
+			}
+		}
+
 		payload.Release = strings.TrimSpace(payload.Release)
 		payload.Environment = strings.TrimSpace(payload.Environment)
 		payload.Message = strings.TrimSpace(payload.Message)
@@ -255,9 +317,9 @@ func (h *APIHandler) HandleBatchEvents(w http.ResponseWriter, r *http.Request) {
 		eventID := uuid.New().String()
 		h.eventChan <- domain.IncomingEvent{
 			EventID:     eventID,
-			ProjectID:   project.ID,
-			ProjectName: project.Name,
-			ProjectKey:  project.APIKey,
+			ProjectID:   eventProj.ID,
+			ProjectName: eventProj.Name,
+			ProjectKey:  eventProj.APIKey,
 			Payload:     payload,
 		}
 		acceptedCount++
@@ -280,10 +342,19 @@ func (h *APIHandler) HandleListIncidents(w http.ResponseWriter, r *http.Request)
 		return
 	}
 
-	project, err := h.authenticate(r)
-	if err != nil {
-		writeError(w, http.StatusUnauthorized, "Unauthorized - "+err.Error())
-		return
+	var projectID int64
+	hasExplicitProject := r.URL.Query().Get("project") != "" ||
+		r.URL.Query().Get("project_name") != "" ||
+		r.URL.Query().Get("project_id") != "" ||
+		r.Header.Get("X-Project") != "" ||
+		r.Header.Get("X-Project-Name") != "" ||
+		r.Header.Get("Authorization") != "" ||
+		r.URL.Query().Get("token") != ""
+
+	if hasExplicitProject {
+		if p, err := h.resolveProject(r, ""); err == nil && p != nil {
+			projectID = p.ID
+		}
 	}
 
 	q := r.URL.Query()
@@ -327,7 +398,7 @@ func (h *APIHandler) HandleListIncidents(w http.ResponseWriter, r *http.Request)
 
 	offset := (page - 1) * limit
 	filter := domain.IncidentFilter{
-		ProjectID:    project.ID,
+		ProjectID:    projectID,
 		Status:       status,
 		Query:        queryStr,
 		Environment:  environment,
@@ -379,12 +450,6 @@ func (h *APIHandler) HandleGetIncident(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	project, err := h.authenticate(r)
-	if err != nil {
-		writeError(w, http.StatusUnauthorized, "Unauthorized - "+err.Error())
-		return
-	}
-
 	idStr := getPathParam(r, "id")
 	id, err := strconv.ParseInt(idStr, 10, 64)
 	if err != nil {
@@ -395,11 +460,6 @@ func (h *APIHandler) HandleGetIncident(w http.ResponseWriter, r *http.Request) {
 	inc, err := h.incidentRepo.GetIncidentByID(r.Context(), id)
 	if err != nil || inc == nil {
 		writeError(w, http.StatusNotFound, "Incident not found")
-		return
-	}
-
-	if inc.ProjectID != project.ID {
-		writeError(w, http.StatusForbidden, "Forbidden")
 		return
 	}
 
@@ -419,12 +479,6 @@ func (h *APIHandler) HandleResolveIncident(w http.ResponseWriter, r *http.Reques
 		return
 	}
 
-	project, err := h.authenticate(r)
-	if err != nil {
-		writeError(w, http.StatusUnauthorized, "Unauthorized - "+err.Error())
-		return
-	}
-
 	idStr := getPathParam(r, "id")
 	id, err := strconv.ParseInt(idStr, 10, 64)
 	if err != nil {
@@ -435,10 +489,6 @@ func (h *APIHandler) HandleResolveIncident(w http.ResponseWriter, r *http.Reques
 	inc, err := h.incidentRepo.GetIncidentByID(r.Context(), id)
 	if err != nil || inc == nil {
 		writeError(w, http.StatusNotFound, "Incident not found")
-		return
-	}
-	if inc.ProjectID != project.ID {
-		writeError(w, http.StatusForbidden, "Forbidden")
 		return
 	}
 
@@ -470,12 +520,6 @@ func (h *APIHandler) HandleReopenIncident(w http.ResponseWriter, r *http.Request
 		return
 	}
 
-	project, err := h.authenticate(r)
-	if err != nil {
-		writeError(w, http.StatusUnauthorized, "Unauthorized - "+err.Error())
-		return
-	}
-
 	idStr := getPathParam(r, "id")
 	id, err := strconv.ParseInt(idStr, 10, 64)
 	if err != nil {
@@ -486,10 +530,6 @@ func (h *APIHandler) HandleReopenIncident(w http.ResponseWriter, r *http.Request
 	inc, err := h.incidentRepo.GetIncidentByID(r.Context(), id)
 	if err != nil || inc == nil {
 		writeError(w, http.StatusNotFound, "Incident not found")
-		return
-	}
-	if inc.ProjectID != project.ID {
-		writeError(w, http.StatusForbidden, "Forbidden")
 		return
 	}
 
@@ -509,12 +549,6 @@ func (h *APIHandler) HandleIgnoreIncident(w http.ResponseWriter, r *http.Request
 		return
 	}
 
-	project, err := h.authenticate(r)
-	if err != nil {
-		writeError(w, http.StatusUnauthorized, "Unauthorized - "+err.Error())
-		return
-	}
-
 	idStr := getPathParam(r, "id")
 	id, err := strconv.ParseInt(idStr, 10, 64)
 	if err != nil {
@@ -525,10 +559,6 @@ func (h *APIHandler) HandleIgnoreIncident(w http.ResponseWriter, r *http.Request
 	inc, err := h.incidentRepo.GetIncidentByID(r.Context(), id)
 	if err != nil || inc == nil {
 		writeError(w, http.StatusNotFound, "Incident not found")
-		return
-	}
-	if inc.ProjectID != project.ID {
-		writeError(w, http.StatusForbidden, "Forbidden")
 		return
 	}
 
@@ -557,12 +587,6 @@ func (h *APIHandler) HandleDeleteIncident(w http.ResponseWriter, r *http.Request
 		return
 	}
 
-	project, err := h.authenticate(r)
-	if err != nil {
-		writeError(w, http.StatusUnauthorized, "Unauthorized - "+err.Error())
-		return
-	}
-
 	idStr := getPathParam(r, "id")
 	id, err := strconv.ParseInt(idStr, 10, 64)
 	if err != nil {
@@ -573,10 +597,6 @@ func (h *APIHandler) HandleDeleteIncident(w http.ResponseWriter, r *http.Request
 	inc, err := h.incidentRepo.GetIncidentByID(r.Context(), id)
 	if err != nil || inc == nil {
 		writeError(w, http.StatusNotFound, "Incident not found")
-		return
-	}
-	if inc.ProjectID != project.ID {
-		writeError(w, http.StatusForbidden, "Forbidden")
 		return
 	}
 
@@ -595,12 +615,6 @@ func (h *APIHandler) HandleBatchIncidents(w http.ResponseWriter, r *http.Request
 		return
 	}
 
-	project, err := h.authenticate(r)
-	if err != nil {
-		writeError(w, http.StatusUnauthorized, "Unauthorized - "+err.Error())
-		return
-	}
-
 	var req domain.BatchIncidentsRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		writeError(w, http.StatusBadRequest, "Bad Request - Invalid JSON")
@@ -612,17 +626,16 @@ func (h *APIHandler) HandleBatchIncidents(w http.ResponseWriter, r *http.Request
 		return
 	}
 
-	// Filter IDs to only those belonging to authenticated project
 	var verifiedIDs []int64
 	for _, id := range req.IDs {
 		inc, err := h.incidentRepo.GetIncidentByID(r.Context(), id)
-		if err == nil && inc != nil && inc.ProjectID == project.ID {
+		if err == nil && inc != nil {
 			verifiedIDs = append(verifiedIDs, id)
 		}
 	}
 
 	if len(verifiedIDs) == 0 {
-		writeError(w, http.StatusNotFound, "No matching incidents found for project")
+		writeError(w, http.StatusNotFound, "No matching incidents found")
 		return
 	}
 
@@ -633,6 +646,7 @@ func (h *APIHandler) HandleBatchIncidents(w http.ResponseWriter, r *http.Request
 	}
 
 	writeJSON(w, http.StatusOK, map[string]any{
+		"status":   "success",
 		"action":   req.Action,
 		"affected": affected,
 	})
@@ -687,12 +701,6 @@ func (h *APIHandler) HandleCreateRelease(w http.ResponseWriter, r *http.Request)
 		return
 	}
 
-	project, err := h.authenticate(r)
-	if err != nil {
-		writeError(w, http.StatusUnauthorized, "Unauthorized - "+err.Error())
-		return
-	}
-
 	if h.releaseRepo == nil {
 		writeError(w, http.StatusInternalServerError, "Release repository not configured")
 		return
@@ -707,6 +715,12 @@ func (h *APIHandler) HandleCreateRelease(w http.ResponseWriter, r *http.Request)
 	req.Version = strings.TrimSpace(req.Version)
 	if req.Version == "" {
 		writeError(w, http.StatusBadRequest, "Bad Request - Version cannot be empty")
+		return
+	}
+
+	project, err := h.resolveProject(r, req.Project)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "Failed to resolve project: "+err.Error())
 		return
 	}
 
@@ -726,11 +740,7 @@ func (h *APIHandler) HandleReleaseIncidents(w http.ResponseWriter, r *http.Reque
 		return
 	}
 
-	project, err := h.authenticate(r)
-	if err != nil {
-		writeError(w, http.StatusUnauthorized, "Unauthorized - "+err.Error())
-		return
-	}
+	project, _ := h.resolveProject(r, "")
 
 	if h.releaseRepo == nil {
 		writeError(w, http.StatusInternalServerError, "Release repository not configured")
@@ -769,11 +779,7 @@ func (h *APIHandler) HandleStatsSummary(w http.ResponseWriter, r *http.Request) 
 		return
 	}
 
-	project, err := h.authenticate(r)
-	if err != nil {
-		writeError(w, http.StatusUnauthorized, "Unauthorized - "+err.Error())
-		return
-	}
+	project, _ := h.resolveProject(r, "")
 
 	summary, err := h.incidentRepo.GetStatsSummary(r.Context(), project.ID)
 	if err != nil {
@@ -793,12 +799,6 @@ func (h *APIHandler) HandleEventsStreamJSON(w http.ResponseWriter, r *http.Reque
 	flusher, ok := w.(http.Flusher)
 	if !ok {
 		writeError(w, http.StatusInternalServerError, "Streaming unsupported")
-		return
-	}
-
-	_, err := h.authenticate(r)
-	if err != nil {
-		writeError(w, http.StatusUnauthorized, "Unauthorized - "+err.Error())
 		return
 	}
 
@@ -856,12 +856,6 @@ func (h *APIHandler) HandleHealthCheck(w http.ResponseWriter, r *http.Request) {
 func (h *APIHandler) HandleUpdateProjectGitHub(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPut && r.Method != http.MethodPost {
 		writeError(w, http.StatusMethodNotAllowed, "Method not allowed")
-		return
-	}
-
-	_, err := h.authenticate(r)
-	if err != nil {
-		writeError(w, http.StatusUnauthorized, "Unauthorized - "+err.Error())
 		return
 	}
 
