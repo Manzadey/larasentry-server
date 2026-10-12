@@ -81,6 +81,31 @@ Used by Laravel clients to push errors. API-ключи не требуются �
 3. Убедитесь, что публичный SSH-ключ раннера GitHub добавлен в `~/.ssh/authorized_keys` на сервере.
 4. Убедитесь, что Docker и Docker Compose установлены и запущены.
 
+### nginx перед сервисом
+
+`/api/*` закрыт списком `ALLOWED_IPS`, а UI и Swagger — basic auth на nginx. Basic auth нельзя вешать на `/api/`: Laravel-клиенты перестанут отправлять события.
+
+```nginx
+location /api/ {
+    proxy_pass http://127.0.0.1:8080;
+    # Обязательно: сервис доверяет заголовку от nginx на своём хосте. Без него все запросы
+    # через nginx выглядят как запросы с хоста и проходят ALLOWED_IPS
+    proxy_set_header X-Real-IP $remote_addr;
+    # Иначе nginx копит поток событий (SSE) в буфере
+    proxy_buffering off;
+}
+
+location / {
+    auth_basic "LaraSentry";
+    auth_basic_user_file /etc/nginx/.htpasswd;
+    proxy_pass http://127.0.0.1:8080;
+    proxy_set_header X-Real-IP $remote_addr;
+    proxy_buffering off;
+}
+```
+
+Файл паролей: `htpasswd -c /etc/nginx/.htpasswd admin` (пакет `apache2-utils`).
+
 ## License
 MIT License
 
