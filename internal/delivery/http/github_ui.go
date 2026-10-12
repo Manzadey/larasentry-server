@@ -1,6 +1,7 @@
 package http
 
 import (
+	"context"
 	"log"
 	"net/http"
 	"strconv"
@@ -65,7 +66,18 @@ func (h *UIHandler) renderGitHubPage(w http.ResponseWriter, r *http.Request, sta
 
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
 	w.WriteHeader(status)
-	data := map[string]any{"Accounts": views, "Error": errMsg, "FormName": formName}
+	projects, err := h.projectRepo.GetAllProjects(ctx)
+	if err != nil {
+		log.Printf("Error getting projects: %v", err)
+	}
+	data := map[string]any{
+		"Accounts":         views,
+		"Error":            errMsg,
+		"FormName":         formName,
+		"GitHubPage":       true,
+		"Projects":         projects,
+		"GitHubRepoGroups": h.selectedRepoGroups(ctx),
+	}
 	if err := h.tmpl.ExecuteTemplate(w, "github.html", data); err != nil {
 		log.Printf("Error rendering github template: %v", err)
 	}
@@ -140,4 +152,16 @@ func accountIDFromPath(w http.ResponseWriter, r *http.Request) (int64, bool) {
 		return 0, false
 	}
 	return id, true
+}
+
+// selectedRepoGroups feeds the repository binding modal shared by the incidents and accounts pages.
+func (h *UIHandler) selectedRepoGroups(ctx context.Context) []repoGroup {
+	if h.githubAccounts == nil {
+		return nil
+	}
+	repos, err := h.githubAccounts.ListSelectedRepos(ctx)
+	if err != nil {
+		log.Printf("Error getting GitHub repos: %v", err)
+	}
+	return groupReposByAccount(repos)
 }

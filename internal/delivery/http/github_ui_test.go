@@ -66,7 +66,7 @@ func TestHandleIndex_RendersSelectedRepoOptions(t *testing.T) {
 	if rec.Code != http.StatusOK {
 		t.Fatalf("expected 200, got %d", rec.Code)
 	}
-	for _, want := range []string{`<optgroup label="Work (octocat)">`, `data-branch="develop"`, "org/app", `name="github_repo_id"`} {
+	for _, want := range []string{`<div role="presentation" class="dd-group">Work (octocat)</div>`, `data-branch="develop"`, "org/app", `name="github_repo_id"`} {
 		if !strings.Contains(body, want) {
 			t.Errorf("expected index to contain %q", want)
 		}

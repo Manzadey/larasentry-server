@@ -207,19 +207,10 @@ func (h *UIHandler) HandleIndex(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	var repoGroups []repoGroup
-	if h.githubAccounts != nil {
-		repos, err := h.githubAccounts.ListSelectedRepos(ctx)
-		if err != nil {
-			log.Printf("Error getting GitHub repos: %v", err)
-		}
-		repoGroups = groupReposByAccount(repos)
-	}
-
 	data["Projects"] = projects
 	data["ProjectCounts"] = projectCounts
 	data["LatestReleases"] = latestReleases
-	data["GitHubRepoGroups"] = repoGroups
+	data["GitHubRepoGroups"] = h.selectedRepoGroups(ctx)
 	data["SelectedProjectID"] = filter.ProjectID
 	data["SelectedSort"] = filter.Sort
 	data["Query"] = filter.Query

@@ -1,5 +1,203 @@
 {{define "copy-button"}}<button type="button" class="copy-btn btn btn-icon btn-ghost h-ghost btn-xs" data-copy="{{.}}" aria-label="Копировать" title="Копировать"><svg class="i-copy" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M8 16H6a2 2 0 01-2-2V6a2 2 0 012-2h8a2 2 0 012 2v2m-6 12h8a2 2 0 002-2v-8a2 2 0 00-2-2h-8a2 2 0 00-2 2v8a2 2 0 002 2z"/></svg><svg class="i-check" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M5 13l4 4L19 7"/></svg></button>{{end}}
 
+{{define "header"}}
+  <header class="shrink-0 min-h-[56px] px-5 py-2.5 border-b border-line flex items-center justify-between gap-x-4 gap-y-2 flex-wrap">
+    <a href="/ui" class="flex items-center gap-2.5 no-underline text-text">
+      <span class="w-7 h-7 rounded-md bg-red flex items-center justify-center">
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#0F131A" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M13 10V3L4 14h7v7l9-11h-7z"/></svg>
+      </span>
+      <span class="text-base font-semibold tracking-tight">LaraSentry</span>
+    </a>
+    <nav aria-label="Основное меню" class="flex items-center gap-2 flex-wrap">
+      {{if not .GitHubPage}}
+      <button id="live-toggle-btn" type="button" class="btn h-btn" onclick="toggleLiveStream()" aria-pressed="true">
+        <span id="live-dot" class="w-2 h-2 rounded-full" style="background: var(--green)"></span>
+        <span id="live-status-text">Обновляется в реальном времени</span>
+      </button>
+      <button id="live-new-btn" type="button" class="btn live-new h-primary" onclick="flushLive()" hidden>
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"/></svg>
+        <span id="live-new-text"></span>
+      </button>
+      {{end}}
+      <button type="button" class="btn h-btn" onclick="openGitHubModal()" aria-haspopup="dialog">
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path fill-rule="evenodd" clip-rule="evenodd" d="M12 2C6.477 2 2 6.484 2 12.017c0 4.425 2.865 8.18 6.839 9.504.5.092.682-.217.682-.483 0-.237-.008-.868-.013-1.703-2.782.605-3.369-1.343-3.369-1.343-.454-1.158-1.11-1.466-1.11-1.466-.908-.62.069-.608.069-.608 1.003.07 1.53 1.032 1.53 1.032.892 1.53 2.341 1.088 2.91.832.092-.647.35-1.088.636-1.338-2.22-.253-4.555-1.113-4.555-4.951 0-1.093.39-1.988 1.029-2.688-.103-.253-.446-1.272.098-2.65 0 0 .84-.27 2.75 1.026A9.564 9.564 0 0112 6.844c.85.004 1.705.115 2.504.337 1.909-1.296 2.747-1.027 2.747-1.027.546 1.379.202 2.398.1 2.651.64.7 1.028 1.595 1.028 2.688 0 3.848-2.339 4.695-4.566 4.943.359.309.678.92.678 1.855 0 1.338-.012 2.419-.012 2.747 0 .268.18.58.688.482A10.019 10.019 0 0022 12.017C22 6.484 17.522 2 12 2z"/></svg>Репозиторий
+      </button>
+      {{if .GitHubPage}}<a href="/ui/github" class="btn nav-current" aria-current="page">Аккаунты GitHub</a>{{else}}<a href="/ui/github" class="btn btn-ghost h-ghost">Аккаунты GitHub</a>{{end}}
+      <a href="/swagger/" target="_blank" rel="noopener" class="btn btn-ghost h-ghost">API</a>
+    </nav>
+  </header>
+{{end}}
+
+{{define "github-modal"}}
+<dialog id="github-modal" class="modal modal-gh" aria-labelledby="gh-title">
+  <form action="/ui/projects/github-settings" method="POST">
+    <div class="modal-head">
+      <div class="flex items-center justify-between gap-3">
+        <h2 id="gh-title" class="flex items-center gap-2">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path fill-rule="evenodd" clip-rule="evenodd" d="M12 2C6.477 2 2 6.484 2 12.017c0 4.425 2.865 8.18 6.839 9.504.5.092.682-.217.682-.483 0-.237-.008-.868-.013-1.703-2.782.605-3.369-1.343-3.369-1.343-.454-1.158-1.11-1.466-1.11-1.466-.908-.62.069-.608.069-.608 1.003.07 1.53 1.032 1.53 1.032.892 1.53 2.341 1.088 2.91.832.092-.647.35-1.088.636-1.338-2.22-.253-4.555-1.113-4.555-4.951 0-1.093.39-1.988 1.029-2.688-.103-.253-.446-1.272.098-2.65 0 0 .84-.27 2.75 1.026A9.564 9.564 0 0112 6.844c.85.004 1.705.115 2.504.337 1.909-1.296 2.747-1.027 2.747-1.027.546 1.379.202 2.398.1 2.651.64.7 1.028 1.595 1.028 2.688 0 3.848-2.339 4.695-4.566 4.943.359.309.678.92.678 1.855 0 1.338-.012 2.419-.012 2.747 0 .268.18.58.688.482A10.019 10.019 0 0022 12.017C22 6.484 17.522 2 12 2z"/></svg>Привязка репозитория GitHub
+        </h2>
+        <button type="button" class="btn btn-icon btn-ghost h-ghost" onclick="closeGitHubModal()" aria-label="Закрыть">
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M6 18L18 6M6 6l12 12"/></svg>
+        </button>
+      </div>
+      <p class="modal-sub">Нужен, чтобы показывать код в «Месте ошибки» и открывать файлы по ссылке.</p>
+    </div>
+    <div class="modal-fields">
+      <div class="field">
+        <label for="github-project-select">Проект</label>
+        <span class="select-wrap">
+          <select name="project_id" id="github-project-select" class="input h-input" onchange="onProjectSelectChange(this)">
+            {{range .Projects}}
+            <option value="{{.ID}}" data-repo-id="{{.GitHubRepoID}}" data-branch="{{.GitHubBranch}}" data-prefix="{{.PathPrefix}}">{{.Name}}</option>
+            {{end}}
+          </select>
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#8D96A8" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M6 9l6 6 6-6"/></svg>
+        </span>
+      </div>
+      <div class="field">
+        <span id="gh-repo-label" class="field-label">Репозиторий GitHub</span>
+        <div id="github-repo-dd" class="dd" data-dd>
+          <input type="hidden" name="github_repo_id" value="0">
+          <button type="button" id="github-repo-button" class="dd-btn h-btn dd-wide" aria-haspopup="listbox" aria-expanded="false" aria-labelledby="gh-repo-label github-repo-button"{{if not .GitHubRepoGroups}} disabled{{end}}>
+            <span class="dd-label">— не привязан —</span>
+            <svg class="dd-chev" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#8D96A8" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M6 9l6 6 6-6"/></svg>
+          </button>
+          <div class="dd-list dd-wide" role="listbox" aria-labelledby="gh-repo-label" hidden>
+            {{template "dd-option" (dict "Value" "0" "Label" "— не привязан —" "Selected" true)}}
+            {{range .GitHubRepoGroups}}
+            <div role="presentation" class="dd-group">{{.Label}}</div>
+            {{range .Repos}}
+            <button type="button" role="option" class="dd-opt" data-value="{{.ID}}" data-label="{{.FullName}}" data-branch="{{.DefaultBranch}}" aria-selected="false" tabindex="-1">
+              <span class="mono" style="font-size: 13px">{{.FullName}}{{if .Private}}<span style="color: var(--muted)"> (private)</span>{{end}}</span>
+              <svg class="dd-check" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#72A7FF" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M5 13l4 4L19 7"/></svg>
+            </button>
+            {{end}}
+            {{end}}
+          </div>
+        </div>
+        {{if not .GitHubRepoGroups}}<span class="field-hint">Нет выбранных репозиториев. <a href="/ui/github" class="h-link" style="text-decoration: none">Подключите аккаунт GitHub</a>.</span>{{end}}
+      </div>
+      <div class="grid grid-cols-2 gap-3">
+        <div class="field">
+          <label for="github-branch-input">Ветка по умолчанию</label>
+          <input type="text" name="github_branch" id="github-branch-input" class="input h-input mono" placeholder="main" value="main">
+          <span id="github-branch-hint" class="field-hint" hidden>Из настроек репозитория</span>
+        </div>
+        <div class="field">
+          <label for="github-prefix-input">Префикс пути (Path Prefix)</label>
+          <input type="text" name="path_prefix" id="github-prefix-input" class="input h-input mono" placeholder="/var/www/html">
+        </div>
+      </div>
+    </div>
+    <div class="modal-foot">
+      <button type="button" class="btn h-btn" onclick="closeGitHubModal()">Отмена</button>
+      <button type="submit" class="btn btn-primary h-primary">Сохранить настройки</button>
+    </div>
+  </form>
+</dialog>
+{{end}}
+
+{{define "common-scripts"}}
+  <script>
+    function ddOpen(dd) {
+      document.querySelectorAll('[data-dd]').forEach(other => other !== dd && ddClose(other));
+      const list = dd.querySelector('[role=listbox]');
+      list.hidden = false;
+      dd.querySelector('.dd-btn').setAttribute('aria-expanded', 'true');
+      (list.querySelector('[aria-selected=true]') || list.querySelector('[role=option]')).focus();
+    }
+
+    function ddClose(dd, focusButton) {
+      const list = dd.querySelector('[role=listbox]');
+      if (list.hidden) return false;
+      list.hidden = true;
+      dd.querySelector('.dd-btn').setAttribute('aria-expanded', 'false');
+      if (focusButton) dd.querySelector('.dd-btn').focus();
+      return true;
+    }
+
+    function ddSelect(dd, option, notify = true) {
+      if (!option) return;
+      dd.querySelectorAll('[role=option]').forEach(o => o.setAttribute('aria-selected', String(o === option)));
+      dd.querySelector('input[type=hidden]').value = option.dataset.value;
+      const button = dd.querySelector('.dd-btn');
+      dd.querySelector('.dd-label').textContent = option.dataset.label;
+      if (button.hasAttribute('aria-label')) {
+        button.setAttribute('aria-label', button.getAttribute('aria-label').replace(/:.*$/, ': ' + option.dataset.label));
+      }
+      if (notify) dd.dispatchEvent(new CustomEvent('dd-change', { bubbles: true }));
+    }
+
+    document.addEventListener('click', e => {
+      const dd = e.target.closest('[data-dd]');
+      document.querySelectorAll('[data-dd]').forEach(other => other !== dd && ddClose(other));
+      if (!dd) return;
+      if (e.target.closest('.dd-btn')) {
+        dd.querySelector('[role=listbox]').hidden ? ddOpen(dd) : ddClose(dd);
+        return;
+      }
+      const option = e.target.closest('[role=option]');
+      if (option) {
+        ddSelect(dd, option);
+        ddClose(dd, true);
+      }
+    });
+
+    document.addEventListener('keydown', e => {
+      const dd = e.target.closest && e.target.closest('[data-dd]');
+      if (!dd) return;
+      if (e.target.closest('.dd-btn') && ['ArrowDown', 'ArrowUp'].includes(e.key)) {
+        e.preventDefault();
+        ddOpen(dd);
+        return;
+      }
+      const options = [...dd.querySelectorAll('[role=option]')];
+      const index = options.indexOf(e.target);
+      if (index < 0) return;
+      const moves = { ArrowDown: index + 1, ArrowUp: index - 1, Home: 0, End: options.length - 1 };
+      if (e.key in moves) {
+        e.preventDefault();
+        options[Math.max(0, Math.min(options.length - 1, moves[e.key]))].focus();
+      } else if (e.key === 'Escape') {
+        e.preventDefault();
+        ddClose(dd, true);
+      } else if (e.key === 'Tab') {
+        ddClose(dd);
+      }
+    });
+
+    function openGitHubModal() {
+      document.getElementById('github-modal').showModal();
+      onProjectSelectChange(document.getElementById('github-project-select'));
+    }
+
+    function closeGitHubModal() {
+      document.getElementById('github-modal').close();
+    }
+
+    function onProjectSelectChange(select) {
+      const opt = select && select.options[select.selectedIndex];
+      if (!opt) return;
+      const dd = document.getElementById('github-repo-dd');
+      // Привязанный репозиторий мог пропасть из выбранных — тогда в списке нет такой опции
+      const option = dd.querySelector(`[role=option][data-value="${opt.dataset.repoId || '0'}"]`) || dd.querySelector('[role=option][data-value="0"]');
+      ddSelect(dd, option, false);
+      document.getElementById('github-branch-input').value = opt.dataset.branch || 'main';
+      document.getElementById('github-prefix-input').value = opt.dataset.prefix || '';
+      document.getElementById('github-branch-hint').hidden = true;
+    }
+
+    document.addEventListener('dd-change', e => {
+      if (e.target.id !== 'github-repo-dd') return;
+      const branch = e.target.querySelector('[role=option][aria-selected=true]').dataset.branch;
+      if (!branch) return;
+      document.getElementById('github-branch-input').value = branch;
+      document.getElementById('github-branch-hint').hidden = false;
+    });
+  </script>
+{{end}}
+
+
 {{define "head"}}
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
@@ -88,12 +286,6 @@
       *, *::before, *::after { transition: none !important; animation-duration: 1ms !important; animation-iteration-count: 1 !important; }
     }
   </style>
-{{end}}
-<!DOCTYPE html>
-<html lang="ru" class="h-full">
-<head>
-  {{template "head" .}}
-  <title>{{block "title" .}}LaraSentry — инциденты{{end}}</title>
   <style>
     .htmx-indicator { display: none; }
     .htmx-request .htmx-indicator, .htmx-request.htmx-indicator { display: inline-flex; }
@@ -102,6 +294,37 @@
       border-radius: 8px; border: 1px solid var(--line); background: var(--raised); color: var(--text); font-size: 13px;
       box-shadow: 0 12px 32px rgba(0,0,0,.45); opacity: 0; transform: translateY(12px); pointer-events: none; transition: opacity .2s ease, transform .2s ease; }
     .toast.show { opacity: 1; transform: none; }
+    .input { width: 100%; box-sizing: border-box; height: 36px; padding: 0 12px; border-radius: 6px; border: 1px solid var(--line); background: var(--surface); color: var(--text); font-size: 14px; }
+    .input::placeholder { color: var(--faint); }
+    .dd { position: relative; }
+    .dd-btn { display: flex; align-items: center; justify-content: space-between; gap: 12px; height: 36px; min-width: 150px; padding: 0 12px; border-radius: 6px; border: 1px solid var(--line); background: var(--surface); color: var(--text); font-size: 13px; cursor: pointer; }
+    .dd-btn[aria-expanded=true] { border-color: var(--blue); }
+    .dd-chev { transition: transform .15s; }
+    .dd-btn[aria-expanded=true] .dd-chev { transform: rotate(180deg); }
+    .dd-list { position: absolute; left: 0; top: 42px; z-index: 20; min-width: 240px; padding: 4px; border-radius: 8px; border: 1px solid var(--line); background: var(--raised); box-shadow: 0 12px 32px rgba(0,0,0,.45); }
+    .dd-list.dd-right { left: auto; right: 0; }
+    .dd-opt { width: 100%; display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 8px 10px; border-radius: 6px; border: 0; background: transparent; color: var(--text); text-align: left; cursor: pointer; }
+    .dd-opt[aria-selected=true] { background: rgba(114,167,255,.08); }
+    .dd-opt-text { display: flex; flex-direction: column; gap: 2px; }
+    .dd-opt-hint { font-size: 12px; color: var(--muted); }
+    .dd-check { visibility: hidden; flex-shrink: 0; }
+    .dd-opt[aria-selected=true] .dd-check { visibility: visible; }
+    .nav-current { border-color: transparent; background: var(--raised); color: var(--text); }
+    .dd-wide { width: 100%; }
+    .dd-btn.dd-wide { min-width: 0; }
+    .dd-list.dd-wide { top: calc(100% + 4px); right: 0; min-width: 0; max-height: 300px; overflow-y: auto; }
+    .dd-btn:disabled { opacity: .6; cursor: not-allowed; }
+    .dd-group { padding: 8px 10px 4px; font-size: 12px; font-weight: 500; color: var(--muted); }
+    .modal-gh { max-width: 520px; background: var(--bg); overflow: visible; }
+    .modal-sub { margin: 0; font-size: 13px; line-height: 1.5; color: var(--muted); }
+    .modal-fields { padding: 16px 20px; display: flex; flex-direction: column; gap: 14px; }
+    .field { display: flex; flex-direction: column; gap: 6px; min-width: 0; }
+    .field > label, .field-label { font-size: 13px; font-weight: 500; color: var(--text-2); }
+    .field .input { font-size: 13px; }
+    .field-hint { font-size: 12px; color: var(--muted); }
+    .select-wrap { position: relative; display: block; }
+    .select-wrap select { appearance: none; -webkit-appearance: none; padding-right: 36px; cursor: pointer; }
+    .select-wrap svg { position: absolute; right: 12px; top: 11px; pointer-events: none; }
     .ns { font-weight: 400; color: var(--muted); }
     .tag { padding: 2px 8px; border-radius: 6px; font-size: 12px; font-weight: 500; white-space: nowrap; }
     .tag-red { color: var(--red); background: var(--red-bg); }
@@ -305,31 +528,15 @@
       .env .env-row dt { grid-column: 1 / -1; }
     }
   </style>
+{{end}}
+<!DOCTYPE html>
+<html lang="ru" class="h-full">
+<head>
+  {{template "head" .}}
+  <title>{{block "title" .}}LaraSentry — инциденты{{end}}</title>
 </head>
 <body class="h-full flex flex-col overflow-hidden">
-  <header class="shrink-0 min-h-[56px] px-5 py-2.5 border-b border-line flex items-center justify-between gap-x-4 gap-y-2 flex-wrap">
-    <a href="/ui" class="flex items-center gap-2.5 no-underline text-text">
-      <span class="w-7 h-7 rounded-md bg-red flex items-center justify-center">
-        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#0F131A" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M13 10V3L4 14h7v7l9-11h-7z"/></svg>
-      </span>
-      <span class="text-base font-semibold tracking-tight">LaraSentry</span>
-    </a>
-    <nav aria-label="Основное меню" class="flex items-center gap-2 flex-wrap">
-      <button id="live-toggle-btn" type="button" class="btn h-btn" onclick="toggleLiveStream()" aria-pressed="true">
-        <span id="live-dot" class="w-2 h-2 rounded-full" style="background: var(--green)"></span>
-        <span id="live-status-text">Обновляется в реальном времени</span>
-      </button>
-      <button id="live-new-btn" type="button" class="btn live-new h-primary" onclick="flushLive()" hidden>
-        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"/></svg>
-        <span id="live-new-text"></span>
-      </button>
-      <button type="button" class="btn h-btn" onclick="openGitHubModal()" aria-haspopup="dialog">
-        <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path fill-rule="evenodd" clip-rule="evenodd" d="M12 2C6.477 2 2 6.484 2 12.017c0 4.425 2.865 8.18 6.839 9.504.5.092.682-.217.682-.483 0-.237-.008-.868-.013-1.703-2.782.605-3.369-1.343-3.369-1.343-.454-1.158-1.11-1.466-1.11-1.466-.908-.62.069-.608.069-.608 1.003.07 1.53 1.032 1.53 1.032.892 1.53 2.341 1.088 2.91.832.092-.647.35-1.088.636-1.338-2.22-.253-4.555-1.113-4.555-4.951 0-1.093.39-1.988 1.029-2.688-.103-.253-.446-1.272.098-2.65 0 0 .84-.27 2.75 1.026A9.564 9.564 0 0112 6.844c.85.004 1.705.115 2.504.337 1.909-1.296 2.747-1.027 2.747-1.027.546 1.379.202 2.398.1 2.651.64.7 1.028 1.595 1.028 2.688 0 3.848-2.339 4.695-4.566 4.943.359.309.678.92.678 1.855 0 1.338-.012 2.419-.012 2.747 0 .268.18.58.688.482A10.019 10.019 0 0022 12.017C22 6.484 17.522 2 12 2z"/></svg>Репозиторий
-      </button>
-      <a href="/ui/github" class="btn btn-ghost h-ghost">Аккаунты GitHub</a>
-      <a href="/swagger/" target="_blank" rel="noopener" class="btn btn-ghost h-ghost">API</a>
-    </nav>
-  </header>
+  {{template "header" .}}
 
   <main class="flex-1 flex overflow-hidden relative">
     {{template "content" .}}
@@ -414,71 +621,9 @@
     </div>
   </template>
 
-  <!-- Модальное окно настроек GitHub -->
-  <div id="github-modal" class="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/60 backdrop-blur-xs hidden">
-    <div class="bg-slate-900 border border-slate-800 rounded-2xl w-full max-w-lg shadow-2xl overflow-hidden">
-      <div class="p-4 border-b border-slate-800 flex items-center justify-between bg-slate-950/60">
-        <div class="flex items-center gap-2">
-          <svg class="w-5 h-5 text-white" fill="currentColor" viewBox="0 0 24 24">
-            <path fill-rule="evenodd" clip-rule="evenodd" d="M12 2C6.477 2 2 6.484 2 12.017c0 4.425 2.865 8.18 6.839 9.504.5.092.682-.217.682-.483 0-.237-.008-.868-.013-1.703-2.782.605-3.369-1.343-3.369-1.343-.454-1.158-1.11-1.466-1.11-1.466-.908-.62.069-.608.069-.608 1.003.07 1.53 1.032 1.53 1.032.892 1.53 2.341 1.088 2.91.832.092-.647.35-1.088.636-1.338-2.22-.253-4.555-1.113-4.555-4.951 0-1.093.39-1.988 1.029-2.688-.103-.253-.446-1.272.098-2.65 0 0 .84-.27 2.75 1.026A9.564 9.564 0 0112 6.844c.85.004 1.705.115 2.504.337 1.909-1.296 2.747-1.027 2.747-1.027.546 1.379.202 2.398.1 2.651.64.7 1.028 1.595 1.028 2.688 0 3.848-2.339 4.695-4.566 4.943.359.309.678.92.678 1.855 0 1.338-.012 2.419-.012 2.747 0 .268.18.58.688.482A10.019 10.019 0 0022 12.017C22 6.484 17.522 2 12 2z"/>
-          </svg>
-          <h3 class="font-bold text-white text-sm">Привязка репозитория GitHub</h3>
-        </div>
-        <button onclick="closeGitHubModal()" class="text-slate-400 hover:text-white p-1 rounded-lg hover:bg-slate-800 transition">
-          <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"/></svg>
-        </button>
-      </div>
+  {{template "github-modal" .}}
 
-      <form action="/ui/projects/github-settings" method="POST" class="p-5 space-y-3.5 text-xs">
-        <div>
-          <label class="block font-medium text-slate-300 mb-1">Проект</label>
-          <select name="project_id" id="github-project-select" onchange="onProjectSelectChange(this)" class="w-full bg-slate-950 border border-slate-800 rounded-xl px-3 py-2 text-slate-100 focus:outline-none focus:ring-2 focus:ring-indigo-500/50">
-            {{range .Projects}}
-            <option value="{{.ID}}" data-repo-id="{{.GitHubRepoID}}" data-branch="{{.GitHubBranch}}" data-prefix="{{.PathPrefix}}">{{.Name}}</option>
-            {{end}}
-          </select>
-        </div>
-
-        <div>
-          <label class="block font-medium text-slate-300 mb-1">Репозиторий GitHub</label>
-          <select name="github_repo_id" id="github-repo-select" onchange="onRepoSelectChange(this)" class="w-full bg-slate-950 border border-slate-800 rounded-xl px-3 py-2 text-slate-100 font-mono focus:outline-none focus:ring-2 focus:ring-indigo-500/50">
-            <option value="0" data-branch="">— не привязан —</option>
-            {{range .GitHubRepoGroups}}
-            <optgroup label="{{.Label}}">
-              {{range .Repos}}
-              <option value="{{.ID}}" data-branch="{{.DefaultBranch}}">{{.FullName}}{{if .Private}} (private){{end}}</option>
-              {{end}}
-            </optgroup>
-            {{end}}
-          </select>
-          {{if not .GitHubRepoGroups}}
-          <p class="text-[11px] text-slate-500 mt-1">Нет выбранных репозиториев. <a href="/ui/github" class="text-indigo-400 hover:underline">Подключите аккаунт GitHub</a>.</p>
-          {{end}}
-        </div>
-
-        <div class="grid grid-cols-2 gap-3">
-          <div>
-            <label class="block font-medium text-slate-300 mb-1">Ветка по умолчанию</label>
-            <input type="text" name="github_branch" id="github-branch-input" placeholder="main" value="main" class="w-full bg-slate-950 border border-slate-800 rounded-xl px-3 py-2 text-slate-100 font-mono focus:outline-none focus:ring-2 focus:ring-indigo-500/50">
-          </div>
-          <div>
-            <label class="block font-medium text-slate-300 mb-1">Префикс пути (Path Prefix)</label>
-            <input type="text" name="path_prefix" id="github-prefix-input" placeholder="/var/www/html" class="w-full bg-slate-950 border border-slate-800 rounded-xl px-3 py-2 text-slate-100 font-mono focus:outline-none focus:ring-2 focus:ring-indigo-500/50">
-          </div>
-        </div>
-
-        <div class="pt-3 border-t border-slate-800 flex items-center justify-end gap-2">
-          <button type="button" onclick="closeGitHubModal()" class="px-3.5 py-2 rounded-xl text-xs text-slate-400 hover:text-white bg-slate-800 hover:bg-slate-700 transition">
-            Отмена
-          </button>
-          <button type="submit" class="px-4 py-2 rounded-xl text-xs font-semibold text-white bg-indigo-600 hover:bg-indigo-500 transition shadow-lg shadow-indigo-900/30">
-            Сохранить настройки
-          </button>
-        </div>
-      </form>
-    </div>
-  </div>
-
+  {{template "common-scripts" .}}
   <script>
     const live = { active: true, pending: new Set(), fresh: new Set(), timer: 0 };
 
@@ -601,71 +746,6 @@
         if (row) row.classList.add('row-highlight');
       });
       live.fresh.clear();
-    });
-
-    function ddOpen(dd) {
-      document.querySelectorAll('[data-dd]').forEach(other => other !== dd && ddClose(other));
-      const list = dd.querySelector('[role=listbox]');
-      list.hidden = false;
-      dd.querySelector('.dd-btn').setAttribute('aria-expanded', 'true');
-      (list.querySelector('[aria-selected=true]') || list.querySelector('[role=option]')).focus();
-    }
-
-    function ddClose(dd, focusButton) {
-      const list = dd.querySelector('[role=listbox]');
-      if (list.hidden) return false;
-      list.hidden = true;
-      dd.querySelector('.dd-btn').setAttribute('aria-expanded', 'false');
-      if (focusButton) dd.querySelector('.dd-btn').focus();
-      return true;
-    }
-
-    function ddSelect(dd, option, notify = true) {
-      if (!option) return;
-      dd.querySelectorAll('[role=option]').forEach(o => o.setAttribute('aria-selected', String(o === option)));
-      dd.querySelector('input[type=hidden]').value = option.dataset.value;
-      const button = dd.querySelector('.dd-btn');
-      dd.querySelector('.dd-label').textContent = option.dataset.label;
-      button.setAttribute('aria-label', button.getAttribute('aria-label').replace(/:.*$/, ': ' + option.dataset.label));
-      if (notify) dd.dispatchEvent(new CustomEvent('dd-change', { bubbles: true }));
-    }
-
-    document.addEventListener('click', e => {
-      const dd = e.target.closest('[data-dd]');
-      document.querySelectorAll('[data-dd]').forEach(other => other !== dd && ddClose(other));
-      if (!dd) return;
-      if (e.target.closest('.dd-btn')) {
-        dd.querySelector('[role=listbox]').hidden ? ddOpen(dd) : ddClose(dd);
-        return;
-      }
-      const option = e.target.closest('[role=option]');
-      if (option) {
-        ddSelect(dd, option);
-        ddClose(dd, true);
-      }
-    });
-
-    document.addEventListener('keydown', e => {
-      const dd = e.target.closest && e.target.closest('[data-dd]');
-      if (!dd) return;
-      if (e.target.closest('.dd-btn') && ['ArrowDown', 'ArrowUp'].includes(e.key)) {
-        e.preventDefault();
-        ddOpen(dd);
-        return;
-      }
-      const options = [...dd.querySelectorAll('[role=option]')];
-      const index = options.indexOf(e.target);
-      if (index < 0) return;
-      const moves = { ArrowDown: index + 1, ArrowUp: index - 1, Home: 0, End: options.length - 1 };
-      if (e.key in moves) {
-        e.preventDefault();
-        options[Math.max(0, Math.min(options.length - 1, moves[e.key]))].focus();
-      } else if (e.key === 'Escape') {
-        e.preventDefault();
-        ddClose(dd, true);
-      } else if (e.key === 'Tab') {
-        ddClose(dd);
-      }
     });
 
     const ICON_CHECK = '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M5 13l4 4L19 7"/></svg>';
@@ -904,48 +984,6 @@
       showToast.timer = setTimeout(() => toast.classList.remove('show'), 2500);
     }
 
-    // Управление модальным окном GitHub
-    function openGitHubModal() {
-      const modal = document.getElementById('github-modal');
-      if (modal) {
-        modal.classList.remove('hidden');
-        const select = document.getElementById('github-project-select');
-        if (select) {
-          onProjectSelectChange(select);
-        }
-      }
-    }
-
-    function closeGitHubModal() {
-      const modal = document.getElementById('github-modal');
-      if (modal) {
-        modal.classList.add('hidden');
-      }
-    }
-
-    function onProjectSelectChange(select) {
-      if (!select) return;
-      const opt = select.options[select.selectedIndex];
-      if (!opt) return;
-      const repoSelect = document.getElementById('github-repo-select');
-      const branchInput = document.getElementById('github-branch-input');
-      const prefixInput = document.getElementById('github-prefix-input');
-      if (repoSelect) {
-        repoSelect.value = opt.getAttribute('data-repo-id') || '0';
-        // Привязанный репозиторий мог пропасть из выбранных — тогда в селекте нет такой опции
-        if (repoSelect.value === '') repoSelect.value = '0';
-      }
-      if (branchInput) branchInput.value = opt.getAttribute('data-branch') || 'main';
-      if (prefixInput) prefixInput.value = opt.getAttribute('data-prefix') || '';
-    }
-
-    function onRepoSelectChange(select) {
-      const opt = select.options[select.selectedIndex];
-      const branch = opt ? opt.getAttribute('data-branch') : '';
-      const branchInput = document.getElementById('github-branch-input');
-      if (branch && branchInput) branchInput.value = branch;
-    }
-
     function isTypingTarget(el) {
       return el && (el.isContentEditable || ['INPUT', 'TEXTAREA', 'SELECT'].includes(el.tagName));
     }
@@ -958,13 +996,7 @@
         return;
       }
       if (e.key === 'Escape') {
-        if (document.querySelector('dialog[open]')) return;
-        const ghModal = document.getElementById('github-modal');
-        if (ghModal && !ghModal.classList.contains('hidden')) {
-          closeGitHubModal();
-        } else if (isDrawerOpen()) {
-          closeDrawer();
-        }
+        if (!document.querySelector('dialog[open]') && isDrawerOpen()) closeDrawer();
         return;
       }
       if (e.key === '/' && !isTypingTarget(document.activeElement)) {

@@ -5,8 +5,6 @@
   .toolbar { padding: 16px 20px; display: flex; align-items: center; gap: 12px; flex-wrap: wrap; border-bottom: 1px solid var(--line); }
   .search { position: relative; flex: 1 1 320px; max-width: 560px; }
   .search-icon { position: absolute; left: 12px; top: 10px; pointer-events: none; }
-  .input { width: 100%; box-sizing: border-box; height: 36px; padding: 0 12px; border-radius: 6px; border: 1px solid var(--line); background: var(--surface); color: var(--text); font-size: 14px; }
-  .input::placeholder { color: var(--faint); }
   .search .input { padding: 0 40px 0 36px; }
   .search input[type=search]::-webkit-search-cancel-button { -webkit-appearance: none; appearance: none; }
   .search-aside { position: absolute; right: 6px; top: 6px; height: 24px; display: flex; align-items: center; }
@@ -19,19 +17,6 @@
   .search.htmx-request .search-spinner { display: inline-flex; }
 
 
-  .dd { position: relative; }
-  .dd-btn { display: flex; align-items: center; justify-content: space-between; gap: 12px; height: 36px; min-width: 150px; padding: 0 12px; border-radius: 6px; border: 1px solid var(--line); background: var(--surface); color: var(--text); font-size: 13px; cursor: pointer; }
-  .dd-btn[aria-expanded=true] { border-color: var(--blue); }
-  .dd-chev { transition: transform .15s; }
-  .dd-btn[aria-expanded=true] .dd-chev { transform: rotate(180deg); }
-  .dd-list { position: absolute; left: 0; top: 42px; z-index: 20; min-width: 240px; padding: 4px; border-radius: 8px; border: 1px solid var(--line); background: var(--raised); box-shadow: 0 12px 32px rgba(0,0,0,.45); }
-  .dd-list.dd-right { left: auto; right: 0; }
-  .dd-opt { width: 100%; display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 8px 10px; border-radius: 6px; border: 0; background: transparent; color: var(--text); text-align: left; cursor: pointer; }
-  .dd-opt[aria-selected=true] { background: rgba(114,167,255,.08); }
-  .dd-opt-text { display: flex; flex-direction: column; gap: 2px; }
-  .dd-opt-hint { font-size: 12px; color: var(--muted); }
-  .dd-check { visibility: hidden; flex-shrink: 0; }
-  .dd-opt[aria-selected=true] .dd-check { visibility: visible; }
 
   .ls-head { display: flex; padding: 8px 0; border-bottom: 1px solid var(--line); font-size: 12px; color: var(--muted); }
   .row { display: flex; border-bottom: 1px solid var(--line); }
@@ -178,7 +163,7 @@
 
 {{define "dd-option"}}
 <button type="button" role="option" class="dd-opt" data-value="{{.Value}}" data-label="{{.Label}}" aria-selected="{{.Selected}}" tabindex="-1">
-  <span class="dd-opt-text"><span style="font-size: 13px">{{.Label}}</span><span class="dd-opt-hint">{{.Hint}}</span></span>
+  <span class="dd-opt-text"><span style="font-size: 13px">{{.Label}}</span>{{with .Hint}}<span class="dd-opt-hint">{{.}}</span>{{end}}</span>
   <svg class="dd-check" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#72A7FF" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M5 13l4 4L19 7"/></svg>
 </button>
 {{end}}
