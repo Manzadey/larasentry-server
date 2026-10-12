@@ -152,6 +152,18 @@ type Project struct {
 	PathPrefix   string `json:"path_prefix,omitempty"`
 }
 
+// GitHubRepo — репозиторий из кэша github_repos.
+type GitHubRepo struct {
+	ID            int64
+	AccountID     int64
+	AccountName   string
+	AccountLogin  string
+	FullName      string
+	DefaultBranch string
+	Private       bool
+	Selected      bool
+}
+
 // Release represents a tracked application version
 type Release struct {
 	ID        int64     `json:"id"`
