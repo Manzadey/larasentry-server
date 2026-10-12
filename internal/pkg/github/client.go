@@ -18,7 +18,7 @@ type cacheEntry struct {
 	expiresAt time.Time
 }
 
-// Client interacts with GitHub REST API and caches file contents.
+// Client работает с GitHub REST API и кэширует содержимое файлов.
 type Client struct {
 	httpClient *http.Client
 	baseURL    string
@@ -27,7 +27,6 @@ type Client struct {
 	cache      map[string]cacheEntry
 }
 
-// NewClient initializes a new GitHub API client.
 func NewClient(httpClient *http.Client, baseURL string, defaultTTL time.Duration) *Client {
 	if httpClient == nil {
 		httpClient = &http.Client{Timeout: 10 * time.Second}
@@ -48,7 +47,7 @@ func NewClient(httpClient *http.Client, baseURL string, defaultTTL time.Duration
 	}
 }
 
-// FetchFileContent retrieves the raw text of a file from a repository at a given ref/commit.
+// FetchFileContent получает сырой текст файла из репозитория на заданном ref или коммите.
 func (c *Client) FetchFileContent(ctx context.Context, repo, token, ref, path string) (string, error) {
 	cleanRepo := CleanRepoOwnerName(repo)
 	if cleanRepo == "" {
@@ -67,7 +66,6 @@ func (c *Client) FetchFileContent(ctx context.Context, repo, token, ref, path st
 
 	cacheKey := fmt.Sprintf("%s:%s:%s", cleanRepo, r, cleanPath)
 
-	// Check cache
 	c.mu.RLock()
 	entry, found := c.cache[cacheKey]
 	c.mu.RUnlock()
@@ -76,15 +74,13 @@ func (c *Client) FetchFileContent(ctx context.Context, repo, token, ref, path st
 		return entry.content, nil
 	}
 
-	// Prepare request to GitHub Contents API
-	// GET /repos/{owner}/{repo}/contents/{path}?ref={ref}
 	reqURL := fmt.Sprintf("%s/repos/%s/contents/%s?ref=%s", c.baseURL, cleanRepo, cleanPath, url.QueryEscape(r))
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, reqURL, nil)
 	if err != nil {
 		return "", fmt.Errorf("failed to create github request: %w", err)
 	}
 
-	// Request raw file content directly
+	// Просим сырое содержимое файла, а не JSON-описание
 	req.Header.Set("Accept", "application/vnd.github.v3.raw")
 	if strings.TrimSpace(token) != "" {
 		req.Header.Set("Authorization", "Bearer "+strings.TrimSpace(token))
@@ -106,7 +102,7 @@ func (c *Client) FetchFileContent(ctx context.Context, repo, token, ref, path st
 		return "", fmt.Errorf("github api error with status %d", resp.StatusCode)
 	}
 
-	// Limit read to 2MB to prevent OOM
+	// Ограничение в 2 МБ защищает от OOM
 	body, err := io.ReadAll(io.LimitReader(resp.Body, 2*1024*1024))
 	if err != nil {
 		return "", fmt.Errorf("failed to read response body: %w", err)
@@ -114,7 +110,7 @@ func (c *Client) FetchFileContent(ctx context.Context, repo, token, ref, path st
 
 	content := string(body)
 
-	// Calculate cache duration: commit SHAs are immutable, cache for 24h
+	// SHA коммитов и теги (v…) не меняются, поэтому кэшируются на 24 часа
 	ttl := c.defaultTTL
 	if len(r) == 40 || strings.HasPrefix(r, "v") {
 		ttl = 24 * time.Hour
@@ -130,10 +126,10 @@ func (c *Client) FetchFileContent(ctx context.Context, repo, token, ref, path st
 	return content, nil
 }
 
-// ResolveCodeSnippet resolves code snippet using hybrid priority:
-// 1. If Incident already contains CodeSnippet from client, return it (enriching with GitHub link if repo configured).
-// 2. If Project has GitHub repository configured, fetch file from GitHub and extract context lines.
-// 3. Otherwise return nil.
+// ResolveCodeSnippet выбирает источник сниппета по приоритету:
+// 1. Если в Incident уже есть CodeSnippet от клиента — возвращает его (добавляя ссылку на GitHub, если репозиторий настроен).
+// 2. Если у Project настроен GitHub-репозиторий — загружает файл с GitHub и вырезает строки контекста.
+// 3. Иначе возвращает nil.
 func ResolveCodeSnippet(
 	ctx context.Context,
 	client *Client,
@@ -145,7 +141,6 @@ func ResolveCodeSnippet(
 		return nil, nil
 	}
 
-	// 1. Priority 1: Client snippet already exists
 	if inc.CodeSnippet != nil && len(inc.CodeSnippet.Lines) > 0 {
 		snippet := *inc.CodeSnippet
 		if snippet.Source == "" {
@@ -171,7 +166,6 @@ func ResolveCodeSnippet(
 		return &snippet, nil
 	}
 
-	// 2. Priority 2: GitHub API fetch
 	if proj == nil || strings.TrimSpace(proj.GitHubRepo) == "" {
 		return nil, nil
 	}
@@ -198,8 +192,8 @@ func ResolveCodeSnippet(
 
 	content, err := client.FetchFileContent(ctx, proj.GitHubRepo, proj.GitHubToken, ref, relPath)
 	if err != nil {
-		// Even if fetching content fails, we still return the snippet shell with the direct GitHub URL
-		// so the developer can click "Open in GitHub"
+		// Даже если загрузить содержимое не удалось, возвращаем заготовку сниппета с прямой ссылкой на GitHub,
+		// чтобы разработчик мог нажать «Открыть в GitHub»
 		return &domain.CodeSnippet{
 			File:      relPath,
 			Line:      inc.Line,

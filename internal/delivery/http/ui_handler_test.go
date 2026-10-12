@@ -255,11 +255,9 @@ func TestHandleIncidentDetail_WithGitHubAndSnippet(t *testing.T) {
 	}
 
 	body := rec.Body.String()
-	// Should render the GitHub link
 	if !strings.Contains(body, "https://github.com/myorg/myapp/blob/main/app/Http/Controllers/OrderController.php#L42") {
 		t.Errorf("rendered HTML does not contain GitHub link")
 	}
-	// Should render snippet code lines
 	if !strings.Contains(body, "$total = $cart") {
 		t.Errorf("rendered HTML does not contain snippet code")
 	}
@@ -434,13 +432,11 @@ func TestHandleIncidentDetail_ExtendedContextTabs(t *testing.T) {
 
 	body := rec.Body.String()
 
-	// 1. Tab buttons
 	if !strings.Contains(body, `id="tab-stack"`) || !strings.Contains(body, `id="tab-context"`) ||
 		!strings.Contains(body, `id="tab-breadcrumbs"`) || !strings.Contains(body, `id="tab-env"`) {
 		t.Errorf("expected tab navigation buttons in rendered HTML")
 	}
 
-	// 2. Breadcrumbs content
 	if !strings.Contains(body, "SELECT * FROM orders WHERE id = 4910") {
 		t.Errorf("expected breadcrumb SQL message in body")
 	}
@@ -448,7 +444,6 @@ func TestHandleIncidentDetail_ExtendedContextTabs(t *testing.T) {
 		t.Errorf("expected breadcrumb HTTP message in body")
 	}
 
-	// 3. Request / Queue content
 	if !strings.Contains(body, "orders.checkout") {
 		t.Errorf("expected route name 'orders.checkout' in body")
 	}
@@ -459,7 +454,6 @@ func TestHandleIncidentDetail_ExtendedContextTabs(t *testing.T) {
 		t.Errorf("expected queue name 'payments-high' in body")
 	}
 
-	// 4. System content
 	if !strings.Contains(body, "worker-pod-7") {
 		t.Errorf("expected hostname 'worker-pod-7' in body")
 	}

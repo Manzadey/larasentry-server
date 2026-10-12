@@ -41,7 +41,7 @@ func TestFilterVendorStackTrace_WithMain(t *testing.T) {
 	}
 
 	stats := GetStackTraceStats(input)
-	if stats.TotalFrames != 2 { // {main} is ignored in frame count
+	if stats.TotalFrames != 2 { // {main} не учитывается в числе кадров
 		t.Errorf("expected 2 total frames, got %d", stats.TotalFrames)
 	}
 	if stats.AppFrames != 1 {

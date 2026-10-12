@@ -6,7 +6,7 @@ import (
 	"golang.org/x/mod/semver"
 )
 
-// NormalizeSemver ensures a version string has a 'v' prefix for semver comparison
+// NormalizeSemver добавляет к версии префикс 'v', нужный для сравнения через semver.
 func NormalizeSemver(v string) (string, bool) {
 	v = strings.TrimSpace(v)
 	if v == "" {
@@ -21,14 +21,14 @@ func NormalizeSemver(v string) (string, bool) {
 	return "", false
 }
 
-// Compare returns:
+// Compare возвращает:
 //
-//	-1 if v1 < v2
-//	 0 if v1 == v2
-//	+1 if v1 > v2
+//	-1, если v1 < v2
+//	 0, если v1 == v2
+//	+1, если v1 > v2
 //
-// If both versions are valid SemVer, semver.Compare is used.
-// Otherwise, fallback is invoked if provided.
+// Если обе версии — валидный SemVer, используется semver.Compare.
+// Иначе вызывается fallback, если он передан.
 func Compare(v1, v2 string, fallback func(v1, v2 string) int) int {
 	v1 = strings.TrimSpace(v1)
 	v2 = strings.TrimSpace(v2)

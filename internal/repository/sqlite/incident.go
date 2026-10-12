@@ -113,12 +113,11 @@ func (r *IncidentRepo) UpsertIncident(ctx context.Context, event domain.Incoming
 		}
 	}
 
-	// 1. Auto-register release if provided
+	// Релиз из события регистрируется автоматически
 	if incomingRel != "" && r.releaseRepo != nil {
 		_, _ = r.releaseRepo.UpsertRelease(ctx, event.ProjectID, incomingRel)
 	}
 
-	// 2. Check if incident already exists
 	var existing struct {
 		id                int64
 		eventsCount       int
@@ -146,7 +145,6 @@ func (r *IncidentRepo) UpsertIncident(ctx context.Context, event domain.Incoming
 		}
 	}
 
-	// Case A: New incident
 	if err == sql.ErrNoRows {
 		insertQuery := `
 		INSERT INTO incidents (
@@ -190,25 +188,24 @@ func (r *IncidentRepo) UpsertIncident(ctx context.Context, event domain.Incoming
 		return nil, err
 	}
 
-	// Case B: Incident already exists
-	// Check if this is an already resolved issue
+	// Уже решённый инцидент: решаем, регрессия это или событие из старого релиза
 	if existing.status == domain.StatusResolved {
 		isRegression := false
 		resolvedIn := existing.resolvedInRelease
 
 		if resolvedIn == "" || resolvedIn == "immediate" {
-			// Immediate resolve re-opens on any new occurrence
+			// Решённый с типом immediate переоткрывается при любом новом событии
 			isRegression = true
 		} else if resolvedIn == "next" {
-			// Resolved in next release: check if incoming release is different from the release at resolution time
+			// Решённый в next: регрессия, если релиз события отличается от релиза на момент решения
 			if incomingRel != "" && incomingRel != existing.lastRelease {
 				isRegression = true
 			}
 		} else {
-			// Resolved in specific version (e.g. "1.2.0")
+			// Решённый в конкретной версии (например, "1.2.0")
 			if incomingRel != "" {
 				cmp := version.Compare(incomingRel, resolvedIn, func(v1, v2 string) int {
-					// Fallback: compare chronological created_at in releases table
+					// Если версии не SemVer, сравниваем по created_at в таблице releases
 					if r.releaseRepo == nil {
 						return strings.Compare(v1, v2)
 					}
@@ -225,14 +222,14 @@ func (r *IncidentRepo) UpsertIncident(ctx context.Context, event domain.Incoming
 					return strings.Compare(v1, v2)
 				})
 				if cmp >= 0 {
-					// Event is from resolved release or newer -> Regression!
+					// Событие из релиза решения или новее — регрессия
 					isRegression = true
 				}
 			}
 		}
 
 		if isRegression {
-			// Re-open incident and mark as regression
+			// Переоткрываем инцидент и помечаем как регрессию
 			updateQuery := `
 			UPDATE incidents SET
 				events_count = events_count + 1,
@@ -290,7 +287,7 @@ func (r *IncidentRepo) UpsertIncident(ctx context.Context, event domain.Incoming
 			}, nil
 		}
 
-		// Event from an older release: update counters quietly, keep status resolved
+		// Событие из более старого релиза: тихо обновляем счётчики, статус остаётся resolved
 		quietQuery := `
 		UPDATE incidents SET
 			events_count = events_count + 1,
@@ -323,11 +320,11 @@ func (r *IncidentRepo) UpsertIncident(ctx context.Context, event domain.Incoming
 			IsRegression: false,
 			IsNew:        false,
 			Incident:     incidentObj,
-			Ignored:      true, // Ignored for alerts and active list
+			Ignored:      true, // не попадает в алерты и список активных
 		}, nil
 	}
 
-	// Normal active incident update (unresolved or ignored)
+	// Обычное обновление активного инцидента (unresolved или ignored)
 	updateQuery := `
 	UPDATE incidents SET
 		events_count = events_count + 1,
@@ -395,7 +392,7 @@ func (r *IncidentRepo) ResolveIncident(ctx context.Context, id int64, resolution
 	} else if resolutionType == "next" {
 		resolvedIn = "next"
 	} else if resolutionType == "current" && resolvedIn == "" {
-		// Look up latest release of project
+		// Берём последний релиз проекта
 		var projectID int64
 		_ = r.db.QueryRowContext(ctx, "SELECT project_id FROM incidents WHERE id = ?", id).Scan(&projectID)
 		if r.releaseRepo != nil && projectID > 0 {
@@ -421,7 +418,7 @@ func (r *IncidentRepo) ResolveIncident(ctx context.Context, id int64, resolution
 	return err
 }
 
-// RestoreIncidentState writes back a state captured before a UI action.
+// RestoreIncidentState записывает обратно состояние, снятое до действия в UI.
 // Resolve и Reopen сбрасывают is_regression и поля решения, поэтому отмена идёт отдельным путём.
 func (r *IncidentRepo) RestoreIncidentState(ctx context.Context, id int64, state domain.IncidentState) error {
 	_, err := r.db.ExecContext(ctx, `

@@ -27,9 +27,8 @@ func init() {
 	})
 }
 
-// InitDB initializes SQLite database and creates tables
+// InitDB открывает SQLite и создаёт таблицы.
 func InitDB(dbPath string) (*sql.DB, error) {
-	// Ensure directory exists for SQLite file
 	if dir := filepath.Dir(dbPath); dir != "" && dir != "." {
 		if err := os.MkdirAll(dir, 0755); err != nil {
 			return nil, fmt.Errorf("failed to create db directory %s: %w", dir, err)
@@ -129,7 +128,7 @@ func InitDB(dbPath string) (*sql.DB, error) {
 		return nil, err
 	}
 
-	// 1. Idempotent migration for existing tables that may miss the new columns
+	// Миграция идемпотентна: в уже существующих таблицах может не быть новых колонок
 	if err := migrateProjectsColumns(db); err != nil {
 		return nil, fmt.Errorf("project migration failed: %w", err)
 	}
@@ -140,7 +139,7 @@ func InitDB(dbPath string) (*sql.DB, error) {
 		return nil, fmt.Errorf("release migration failed: %w", err)
 	}
 
-	// 2. Create indexes ONLY AFTER columns are guaranteed to exist
+	// Индексы создаются только после миграций, когда колонки гарантированно есть
 	createIndexes := `
 	CREATE INDEX IF NOT EXISTS idx_incidents_status ON incidents(project_id, status);
 	CREATE INDEX IF NOT EXISTS idx_incidents_last_seen ON incidents(project_id, last_seen_at DESC);

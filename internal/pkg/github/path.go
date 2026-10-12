@@ -27,8 +27,8 @@ var defaultLaravelMarkers = []string{
 	"app/",
 }
 
-// CleanRepoOwnerName normalizes a repo string like "https://github.com/owner/repo.git" or "owner/repo"
-// into clean "owner/repo".
+// CleanRepoOwnerName приводит строку репозитория вида "https://github.com/owner/repo.git" или "owner/repo"
+// к чистому "owner/repo".
 func CleanRepoOwnerName(rawRepo string) string {
 	repo := strings.TrimSpace(rawRepo)
 	repo = strings.TrimPrefix(repo, "https://github.com/")
@@ -39,14 +39,13 @@ func CleanRepoOwnerName(rawRepo string) string {
 	return repo
 }
 
-// NormalizePath strips custom prefix or auto-detects Laravel project root
-// to produce a repository-relative path (e.g. app/Http/Controllers/OrderController.php).
+// NormalizePath срезает заданный префикс или сам находит корень Laravel-проекта,
+// чтобы получить путь относительно репозитория (например, app/Http/Controllers/OrderController.php).
 func NormalizePath(filePath, pathPrefix string) string {
-	// Normalize backslashes (Windows) to forward slashes
+	// Пути из Windows приходят с обратными слэшами
 	p := strings.ReplaceAll(strings.TrimSpace(filePath), "\\", "/")
 	prefix := strings.ReplaceAll(strings.TrimSpace(pathPrefix), "\\", "/")
 
-	// 1. If explicit pathPrefix is configured, try stripping it
 	if prefix != "" {
 		if !strings.HasSuffix(prefix, "/") {
 			prefix += "/"
@@ -54,7 +53,7 @@ func NormalizePath(filePath, pathPrefix string) string {
 		if strings.HasPrefix(p, prefix) {
 			return strings.TrimPrefix(p, prefix)
 		}
-		// Also try without trailing slash just in case
+		// Префикс может совпасть и без завершающего слэша
 		prefixNoSlash := strings.TrimSuffix(prefix, "/")
 		if strings.HasPrefix(p, prefixNoSlash) {
 			res := strings.TrimPrefix(p, prefixNoSlash)
@@ -62,22 +61,21 @@ func NormalizePath(filePath, pathPrefix string) string {
 		}
 	}
 
-	// 2. Heuristic: search for known Laravel root directory markers
+	// Эвристика: ищем известные маркеры корневых каталогов Laravel
 	for _, marker := range defaultLaravelMarkers {
 		if idx := strings.Index(p, marker); idx != -1 {
 			return p[idx:]
 		}
-		// Also check leading marker without slash, e.g. "app/"
+		// Путь может начинаться с маркера без ведущего слэша, например "app/"
 		if strings.HasPrefix(p, marker) {
 			return p
 		}
 	}
 
-	// 3. Fallback: just strip leading slashes
 	return strings.TrimPrefix(p, "/")
 }
 
-// BuildBlobURL constructs the full direct GitHub URL to a file and line number.
+// BuildBlobURL собирает прямую ссылку на файл и строку в GitHub.
 func BuildBlobURL(rawRepo, ref, relativePath string, line int) string {
 	repo := CleanRepoOwnerName(rawRepo)
 	if repo == "" {
@@ -97,7 +95,7 @@ func BuildBlobURL(rawRepo, ref, relativePath string, line int) string {
 	return urlStr
 }
 
-// BuildIssueURL constructs a pre-filled GitHub new issue URL with title and body.
+// BuildIssueURL собирает ссылку на создание issue в GitHub с заполненными заголовком и текстом.
 func BuildIssueURL(rawRepo, title, body string) string {
 	repo := CleanRepoOwnerName(rawRepo)
 	if repo == "" {

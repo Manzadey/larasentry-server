@@ -108,7 +108,7 @@ func TestHandleEvent_NoToken_AutoResolvesDefaultProject(t *testing.T) {
 	}
 	body, _ := json.Marshal(payload)
 
-	// Missing header / token - should succeed and auto-resolve
+	// Без заголовка и токена запрос проходит, проект определяется автоматически
 	req := httptest.NewRequest(http.MethodPost, "/api/events", bytes.NewReader(body))
 	rec := httptest.NewRecorder()
 	handler.HandleEvent(rec, req)
@@ -240,7 +240,6 @@ func TestHandleListIncidents(t *testing.T) {
 func TestHandleGetIncident(t *testing.T) {
 	handler, _, _ := setupTestAPIHandler(t)
 
-	// Create test request with PathValue
 	req := httptest.NewRequest(http.MethodGet, "/api/incidents/42", nil)
 	req.SetPathValue("id", "42")
 	req.Header.Set("Authorization", "Bearer test-key")
@@ -268,7 +267,6 @@ func TestHandleGetIncident(t *testing.T) {
 func TestHandleIncidentLifecycle(t *testing.T) {
 	handler, _, _ := setupTestAPIHandler(t)
 
-	// 1. Resolve
 	resolveBody, _ := json.Marshal(domain.ResolveRequest{Type: "next"})
 	req := httptest.NewRequest(http.MethodPost, "/api/incidents/42/resolve", bytes.NewReader(resolveBody))
 	req.SetPathValue("id", "42")
@@ -279,7 +277,6 @@ func TestHandleIncidentLifecycle(t *testing.T) {
 		t.Fatalf("resolve failed with %d: %s", rec.Code, rec.Body.String())
 	}
 
-	// 2. Reopen
 	req = httptest.NewRequest(http.MethodPost, "/api/incidents/42/reopen", nil)
 	req.SetPathValue("id", "42")
 	req.Header.Set("Authorization", "Bearer test-key")
@@ -289,7 +286,6 @@ func TestHandleIncidentLifecycle(t *testing.T) {
 		t.Fatalf("reopen failed with %d: %s", rec.Code, rec.Body.String())
 	}
 
-	// 3. Ignore
 	ignoreBody, _ := json.Marshal(map[string]bool{"ignored": true})
 	req = httptest.NewRequest(http.MethodPost, "/api/incidents/42/ignore", bytes.NewReader(ignoreBody))
 	req.SetPathValue("id", "42")
@@ -300,7 +296,6 @@ func TestHandleIncidentLifecycle(t *testing.T) {
 		t.Fatalf("ignore failed with %d: %s", rec.Code, rec.Body.String())
 	}
 
-	// 4. Delete
 	req = httptest.NewRequest(http.MethodDelete, "/api/incidents/42", nil)
 	req.SetPathValue("id", "42")
 	req.Header.Set("Authorization", "Bearer test-key")
@@ -338,7 +333,6 @@ func TestHandleBatchIncidents(t *testing.T) {
 func TestHandleReleases(t *testing.T) {
 	handler, _, _ := setupTestAPIHandler(t)
 
-	// 1. Create release
 	createBody, _ := json.Marshal(domain.CreateReleaseRequest{
 		Version: "v1.5.0",
 		Ref:     "refs/heads/main",
@@ -352,7 +346,6 @@ func TestHandleReleases(t *testing.T) {
 		t.Fatalf("create release failed with %d: %s", rec.Code, rec.Body.String())
 	}
 
-	// 2. List releases
 	req = httptest.NewRequest(http.MethodGet, "/api/releases", nil)
 	req.Header.Set("Authorization", "Bearer test-key")
 	rec = httptest.NewRecorder()
@@ -361,7 +354,6 @@ func TestHandleReleases(t *testing.T) {
 		t.Fatalf("list releases failed with %d: %s", rec.Code, rec.Body.String())
 	}
 
-	// 3. Release incidents
 	req = httptest.NewRequest(http.MethodGet, "/api/releases/v1.5.0/incidents", nil)
 	req.SetPathValue("version", "v1.5.0")
 	req.Header.Set("Authorization", "Bearer test-key")

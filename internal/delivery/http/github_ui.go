@@ -154,7 +154,7 @@ func accountIDFromPath(w http.ResponseWriter, r *http.Request) (int64, bool) {
 	return id, true
 }
 
-// selectedRepoGroups feeds the repository binding modal shared by the incidents and accounts pages.
+// selectedRepoGroups готовит данные для модалки привязки репозитория, общей для страниц инцидентов и аккаунтов.
 func (h *UIHandler) selectedRepoGroups(ctx context.Context) []repoGroup {
 	if h.githubAccounts == nil {
 		return nil

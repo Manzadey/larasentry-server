@@ -80,7 +80,7 @@ func (h *APIHandler) resolveProject(r *http.Request, explicitName string) (*doma
 		}
 	}
 
-	// Backwards compatibility for Bearer tokens or query param token
+	// Bearer-токен и параметр token поддерживаются только для обратной совместимости
 	authHeader := r.Header.Get("Authorization")
 	var apiKey string
 	if authHeader != "" && strings.HasPrefix(authHeader, "Bearer ") {
@@ -117,7 +117,7 @@ func getPathParam(r *http.Request, key string) string {
 	if val := r.PathValue(key); val != "" {
 		return val
 	}
-	// Fallback path segment parsing
+	// Запасной разбор сегментов пути, если PathValue пуст
 	parts := strings.Split(strings.Trim(r.URL.Path, "/"), "/")
 	if key == "id" && len(parts) >= 3 && parts[1] == "incidents" {
 		return parts[2]
@@ -127,10 +127,6 @@ func getPathParam(r *http.Request, key string) string {
 	}
 	return ""
 }
-
-// =============================================================================
-// 1. EVENT INGESTION
-// =============================================================================
 
 // HandleEvent handles POST /api/events
 // @Summary Отправить событие ошибки (Event Ingestion)
@@ -341,10 +337,6 @@ func (h *APIHandler) HandleBatchEvents(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
-// =============================================================================
-// 2. INCIDENTS API
-// =============================================================================
-
 // HandleListIncidents handles GET /api/incidents
 // @Summary Список инцидентов с фильтрацией и пагинацией
 // @Description Возвращает постраничный список сгруппированных инцидентов проекта. Поддерживает фильтрацию по статусу (unresolved, resolved, ignored, all), окружению, версии релиза, поисковой строке, только регрессиям, а также сортировку и пагинацию с метаданными.
@@ -450,7 +442,7 @@ func (h *APIHandler) HandleListIncidents(w http.ResponseWriter, r *http.Request)
 		total = len(incidents)
 	}
 
-	// Optimize bandwidth: strip stack traces if not requested
+	// Экономим трафик: stacktrace отдаём, только если его запросили
 	if !includeTrace {
 		for i := range incidents {
 			incidents[i].StackTrace = ""
@@ -745,10 +737,6 @@ func (h *APIHandler) HandleBatchIncidents(w http.ResponseWriter, r *http.Request
 	})
 }
 
-// =============================================================================
-// 3. RELEASES API
-// =============================================================================
-
 // HandleListReleases handles GET /api/releases
 // @Summary Список релизов проекта
 // @Description Возвращает историю версий и деплоев приложения с агрегированной статистикой по каждой версии: общее число ошибок, количество новых багов и регрессий.
@@ -903,10 +891,6 @@ func (h *APIHandler) HandleReleaseIncidents(w http.ResponseWriter, r *http.Reque
 	writeJSON(w, http.StatusOK, incidents)
 }
 
-// =============================================================================
-// 4. ANALYTICS & STATS
-// =============================================================================
-
 // HandleStatsSummary handles GET /api/stats/summary
 // @Summary Сводная аналитика и счетчики проекта
 // @Description Возвращает ключевые показатели для дашбордов и мониторинга: общее количество инцидентов, нерешенные, решенные, заглушенные, число регрессий и объем событий за последние 24 часа.
@@ -939,10 +923,6 @@ func (h *APIHandler) HandleStatsSummary(w http.ResponseWriter, r *http.Request) 
 
 	writeJSON(w, http.StatusOK, summary)
 }
-
-// =============================================================================
-// 5. REALTIME SSE & SYSTEM HEALTH
-// =============================================================================
 
 // HandleEventsStreamJSON handles GET /api/events/stream
 // @Summary Поток событий в реальном времени (Server-Sent Events)

@@ -51,39 +51,32 @@ func main() {
 		}
 	}
 
-	// 1. Initialize SQLite Database
 	db, err := sqlite.InitDB(dbPath)
 	if err != nil {
 		log.Fatalf("Failed to initialize DB: %v", err)
 	}
 	defer db.Close()
 
-	// 2. Setup Repositories
 	projectRepo := sqlite.NewProjectRepo(db)
 	releaseRepo := sqlite.NewReleaseRepo(db)
 	incidentRepo := sqlite.NewIncidentRepo(db, releaseRepo)
 
-	// 3. Setup Channels and UseCases
 	eventChan := make(chan domain.IncomingEvent, 1000)
 	processor := usecase.NewProcessor(incidentRepo, eventChan)
 	go processor.Start()
 
-	// 4. Setup Database Cleaner
 	go sqlite.StartCleaner(incidentRepo, 30)
 
-	// 5. Setup Telegram Alert Manager
 	alertSender := telegram.NewBotSender(tgToken, tgChatID, tgProxy)
 	alertManager := usecase.NewAlertManager(processor, alertSender, alertInterval)
 	go alertManager.Start()
 
-	// 6. Setup SSE Broker & UI Handler
 	sseBroker := sse.NewBroker()
 	uiHandler, err := deliveryHttp.NewUIHandler(projectRepo, incidentRepo, releaseRepo, sseBroker)
 	if err != nil {
 		log.Fatalf("Failed to initialize UI handler: %v", err)
 	}
 
-	// Setup GitHub API client
 	githubClient := github.NewClient(nil, "", 15*time.Minute)
 	uiHandler.SetGitHubClient(githubClient)
 	githubAccountRepo := sqlite.NewGitHubAccountRepo(db)
@@ -93,7 +86,6 @@ func main() {
 		sseBroker.BroadcastIncident(inc)
 	})
 
-	// 7. Setup HTTP Server
 	allowedIPsStr := os.Getenv("ALLOWED_IPS")
 	var allowedIPs []string
 	if allowedIPsStr != "" {
@@ -117,11 +109,9 @@ func main() {
 	api := http.NewServeMux()
 	mux.Handle("/api/", deliveryHttp.NewIPAllowlist(allowedIPs).Middleware(api))
 
-	// 1. Ingestion routes
 	api.HandleFunc("POST /api/events", apiHandler.HandleEvent)
 	api.HandleFunc("POST /api/events/batch", apiHandler.HandleBatchEvents)
 
-	// 2. Incidents routes
 	api.HandleFunc("GET /api/incidents", apiHandler.HandleListIncidents)
 	api.HandleFunc("POST /api/incidents/batch", apiHandler.HandleBatchIncidents)
 	api.HandleFunc("GET /api/incidents/{id}", apiHandler.HandleGetIncident)
@@ -130,25 +120,20 @@ func main() {
 	api.HandleFunc("POST /api/incidents/{id}/reopen", apiHandler.HandleReopenIncident)
 	api.HandleFunc("POST /api/incidents/{id}/ignore", apiHandler.HandleIgnoreIncident)
 
-	// 3. Projects routes
 	api.HandleFunc("PUT /api/projects/{id}/github", apiHandler.HandleUpdateProjectGitHub)
 	api.HandleFunc("POST /api/projects/{id}/github", apiHandler.HandleUpdateProjectGitHub)
 
-	// 4. Releases routes
 	api.HandleFunc("GET /api/releases", apiHandler.HandleListReleases)
 	api.HandleFunc("POST /api/releases", apiHandler.HandleCreateRelease)
 	api.HandleFunc("GET /api/releases/{version}/incidents", apiHandler.HandleReleaseIncidents)
 
-	// 5. Analytics & System
 	api.HandleFunc("GET /api/stats/summary", apiHandler.HandleStatsSummary)
 	api.HandleFunc("GET /api/events/stream", apiHandler.HandleEventsStreamJSON)
 	api.HandleFunc("GET /api/health", apiHandler.HandleHealthCheck)
 
-	// Swagger documentation
 	mux.HandleFunc("/swagger/", httpSwagger.WrapHandler)
 
 
-	// UI routes
 	mux.HandleFunc("/ui", uiHandler.HandleIndex)
 	mux.HandleFunc("/ui/incidents", uiHandler.HandleIncidents)
 	mux.HandleFunc("/ui/incidents/", uiHandler.HandleIncidentDetail)
@@ -160,7 +145,6 @@ func main() {
 	mux.HandleFunc("POST /ui/github/accounts/{id}/repos", uiHandler.HandleSaveGitHubRepos)
 	mux.HandleFunc("/ui/events/stream", uiHandler.HandleEventsStream)
 
-	// Root redirect
 	mux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path == "/" {
 			http.Redirect(w, r, "/ui", http.StatusSeeOther)

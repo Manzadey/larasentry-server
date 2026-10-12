@@ -39,7 +39,6 @@ func NewUIHandler(
 	releaseRepo domain.ReleaseRepository,
 	sseBroker *sse.Broker,
 ) (*UIHandler, error) {
-	// Parse all templates from embedded FS with helper functions
 	funcMap := template.FuncMap{
 		"trim":     strings.TrimSpace,
 		"join":     strings.Join,
@@ -139,12 +138,11 @@ func NewUIHandler(
 	return h, nil
 }
 
-// SetGitHubClient sets the GitHub API client for fetching file snippets
 func (h *UIHandler) SetGitHubClient(client *github.Client) {
 	h.githubClient = client
 }
 
-// parseListFilter reads list filters shared by the page and the HTMX partial.
+// parseListFilter читает фильтры списка, общие для страницы и HTMX-партиала.
 func parseListFilter(r *http.Request) domain.IncidentFilter {
 	q := r.URL.Query()
 	filter := domain.IncidentFilter{
@@ -163,7 +161,7 @@ func parseListFilter(r *http.Request) domain.IncidentFilter {
 	return filter
 }
 
-// listData collects rows and status segment counters for the selected project.
+// listData собирает строки и счётчики сегментов по статусам для выбранного проекта.
 func (h *UIHandler) listData(ctx context.Context, filter domain.IncidentFilter) (map[string]interface{}, error) {
 	incidents, err := h.incidentRepo.GetIncidents(ctx, filter)
 	if err != nil {
@@ -181,7 +179,7 @@ func (h *UIHandler) listData(ctx context.Context, filter domain.IncidentFilter) 
 	}, nil
 }
 
-// HandleIndex renders the main dashboard page (/ui)
+// HandleIndex рендерит главную страницу дашборда (/ui).
 func (h *UIHandler) HandleIndex(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
 	filter := parseListFilter(r)
@@ -225,7 +223,7 @@ func (h *UIHandler) HandleIndex(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
-// HandleIncidents returns filtered incident rows plus out-of-band segment counters (HTMX partial)
+// HandleIncidents возвращает отфильтрованные строки инцидентов и out-of-band счётчики сегментов (HTMX-партиал).
 func (h *UIHandler) HandleIncidents(w http.ResponseWriter, r *http.Request) {
 	data, err := h.listData(r.Context(), parseListFilter(r))
 	if err != nil {
@@ -242,7 +240,7 @@ func (h *UIHandler) HandleIncidents(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
-// HandleIncidentDetail returns drawer content or handles resolve/reopen actions
+// HandleIncidentDetail возвращает содержимое drawer или обрабатывает действия resolve/reopen.
 func (h *UIHandler) HandleIncidentDetail(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
 
@@ -351,7 +349,7 @@ func (h *UIHandler) HandleIncidentDetail(w http.ResponseWriter, r *http.Request)
 	}
 }
 
-// HandleEventsStream handles SSE connections from HTMX
+// HandleEventsStream обслуживает SSE-подключения от HTMX.
 func (h *UIHandler) HandleEventsStream(w http.ResponseWriter, r *http.Request) {
 	flusher, ok := w.(http.Flusher)
 	if !ok {
@@ -368,7 +366,7 @@ func (h *UIHandler) HandleEventsStream(w http.ResponseWriter, r *http.Request) {
 	h.sseBroker.Register(clientChan)
 	defer h.sseBroker.Unregister(clientChan)
 
-	// Send initial comment to establish SSE connection immediately
+	// Начальный комментарий нужен, чтобы SSE-соединение установилось сразу
 	fmt.Fprintf(w, ": connected\n\n")
 	flusher.Flush()
 
@@ -387,7 +385,7 @@ func (h *UIHandler) HandleEventsStream(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
-// HandleUpdateProjectGitHubSettings handles POST /ui/projects/github-settings
+// HandleUpdateProjectGitHubSettings обрабатывает POST /ui/projects/github-settings.
 func (h *UIHandler) HandleUpdateProjectGitHubSettings(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
 		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
@@ -433,7 +431,7 @@ func (h *UIHandler) HandleUpdateProjectGitHubSettings(w http.ResponseWriter, r *
 	http.Redirect(w, r, returnTo, http.StatusSeeOther)
 }
 
-// baseName returns the last segment of a PHP class name or a file path.
+// baseName возвращает последний сегмент имени PHP-класса или пути к файлу.
 func baseName(s string) string {
 	return s[strings.LastIndexAny(s, `\/`)+1:]
 }
@@ -450,7 +448,7 @@ func plural(n int, one, few, many string) string {
 	}
 }
 
-// parseIncidentState validates the state the UI captured before an action it now undoes.
+// parseIncidentState проверяет состояние, которое UI сохранил до действия и теперь откатывает.
 func parseIncidentState(r *http.Request) (domain.IncidentState, error) {
 	state := domain.IncidentState{
 		Status:            domain.IncidentStatus(r.FormValue("status")),
@@ -488,7 +486,7 @@ func snippetNote(inc *domain.Incident, frames []domain.StackFrame) string {
 	return "Исходный код недоступен: клиент не прислал фрагмент, а репозиторий GitHub для проекта не привязан."
 }
 
-// ctxValue renders an application context value: strings as is, everything else as indented JSON.
+// ctxValue рендерит значение контекста приложения: строки как есть, остальное — JSON с отступами.
 func ctxValue(v any) string {
 	switch val := v.(type) {
 	case nil:
@@ -502,7 +500,7 @@ func ctxValue(v any) string {
 	}
 }
 
-// jsonPretty renders v as JSON indented by two spaces.
+// jsonPretty рендерит v как JSON с отступом в два пробела.
 func jsonPretty(v any) string {
 	if v == nil {
 		return ""
@@ -518,7 +516,7 @@ func jsonPretty(v any) string {
 	return strings.TrimSuffix(buf.String(), "\n")
 }
 
-// dict builds a map from key/value pairs to pass several values into a nested template.
+// dict собирает map из пар ключ/значение, чтобы передать несколько значений во вложенный шаблон.
 func dict(pairs ...any) (map[string]any, error) {
 	if len(pairs)%2 != 0 {
 		return nil, errors.New("dict: odd number of arguments")

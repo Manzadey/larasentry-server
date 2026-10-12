@@ -9,30 +9,29 @@ import (
 )
 
 var (
-	// vendorPathRegex matches vendor directory occurrences in file paths:
-	// matches /vendor/, \vendor\, or vendor/ at line/frame start,
-	// while avoiding false positives like VendorController.php or App\Models\Vendor.
+	// vendorPathRegex ищет каталог vendor в пути к файлу: /vendor/, \vendor\ или vendor/
+	// в начале строки или кадра, не давая ложных срабатываний на VendorController.php
+	// или App\Models\Vendor.
 	vendorPathRegex  = regexp.MustCompile(`(?i)(?:^|[\s/\\"'` + "`" + `])vendor[/\\].*`)
 	framePrefixRegex = regexp.MustCompile(`^(?:#\d+|\d+)\s+`)
 )
 
-// StackTraceStats contains frame count statistics.
 type StackTraceStats struct {
 	TotalFrames int
 	AppFrames   int
 }
 
-// IsVendorTraceLine checks if a given stack trace line or frame belongs to vendor/third-party code.
+// IsVendorTraceLine проверяет, относится ли строка или кадр stacktrace к vendor-коду (сторонним пакетам).
 func IsVendorTraceLine(line string) bool {
 	lower := strings.ToLower(line)
-	// If it explicitly belongs to the application path, keep it
+	// Явный путь приложения не считается vendor-кодом
 	if strings.Contains(lower, "/app/") || strings.Contains(lower, "\\app\\") {
 		return false
 	}
 	return vendorPathRegex.MatchString(line)
 }
 
-// IsMainTraceLine checks if the line is the PHP execution entry point {main}.
+// IsMainTraceLine проверяет, что строка — точка входа PHP {main}.
 func IsMainTraceLine(line string) bool {
 	trimmed := strings.TrimSpace(line)
 	return trimmed == "{main}" || strings.HasSuffix(trimmed, " {main}")
@@ -82,8 +81,8 @@ func parseStackFrames(raw string) []stackFrame {
 	return frames
 }
 
-// FilterVendorStackTrace filters out third-party vendor frames and {main} from a stack trace string,
-// returning only the application's own stack frames.
+// FilterVendorStackTrace убирает из stacktrace vendor-кадры и {main},
+// оставляя только кадры самого приложения.
 func FilterVendorStackTrace(raw string) string {
 	frames := parseStackFrames(raw)
 	if len(frames) == 0 {
@@ -105,7 +104,7 @@ func FilterVendorStackTrace(raw string) string {
 	return strings.Join(filtered, "\n")
 }
 
-// GetStackTraceStats counts total stack frames and application stack frames (excluding vendor and {main}).
+// GetStackTraceStats считает все кадры и кадры приложения (без vendor и {main}).
 func GetStackTraceStats(raw string) StackTraceStats {
 	frames := parseStackFrames(raw)
 	stats := StackTraceStats{}
@@ -122,12 +121,11 @@ func GetStackTraceStats(raw string) StackTraceStats {
 	return stats
 }
 
-// AppStackTrace returns the stack trace filtered without vendor frames.
+// AppStackTrace возвращает stacktrace без vendor-кадров.
 func (inc Incident) AppStackTrace() string {
 	return FilterVendorStackTrace(inc.StackTrace)
 }
 
-// StackTraceStats returns the statistics for total and application stack frames.
 func (inc Incident) StackTraceStats() StackTraceStats {
 	return GetStackTraceStats(inc.StackTrace)
 }
@@ -139,7 +137,7 @@ var (
 	frameCallRegex = regexp.MustCompile(`^([^(]*?)(->|::)([^(]*)`)
 )
 
-// StackFrame is one parsed frame of a PHP stack trace.
+// StackFrame — один разобранный кадр PHP stacktrace.
 type StackFrame struct {
 	Index  int
 	File   string
@@ -150,23 +148,23 @@ type StackFrame struct {
 	Vendor bool
 }
 
-// ShortClass returns the class name without its namespace.
+// ShortClass возвращает имя класса без namespace.
 func (f StackFrame) ShortClass() string {
 	return f.Class[strings.LastIndex(f.Class, `\`)+1:]
 }
 
-// FileName returns the file name without its directory.
+// FileName возвращает имя файла без каталога.
 func (f StackFrame) FileName() string {
 	return f.File[strings.LastIndexAny(f.File, `/\`)+1:]
 }
 
-// StackGroup is either a single application frame or a run of consecutive vendor frames.
+// StackGroup — либо один кадр приложения, либо серия подряд идущих vendor-кадров.
 type StackGroup struct {
 	Vendor bool
 	Frames []StackFrame
 }
 
-// CallNode is one box of the call graph: entry point first, the throwing frame last.
+// CallNode — один блок графа вызовов: первой идёт точка входа, последним — кадр, где брошено исключение.
 type CallNode struct {
 	Vendor   bool
 	Group    bool
@@ -178,7 +176,7 @@ type CallNode struct {
 	Via      string
 }
 
-// ParseFrames parses a raw PHP stack trace into frames, skipping {main}.
+// ParseFrames разбирает сырой PHP stacktrace на кадры, пропуская {main}.
 func ParseFrames(raw string) []StackFrame {
 	var frames []StackFrame
 	for _, f := range parseStackFrames(raw) {
@@ -205,7 +203,7 @@ func ParseFrames(raw string) []StackFrame {
 	return frames
 }
 
-// GroupFrames keeps application frames separate and collapses consecutive vendor frames.
+// GroupFrames оставляет кадры приложения по отдельности и схлопывает подряд идущие vendor-кадры.
 func GroupFrames(frames []StackFrame) []StackGroup {
 	var groups []StackGroup
 	for _, f := range frames {
@@ -218,8 +216,8 @@ func GroupFrames(frames []StackFrame) []StackGroup {
 	return groups
 }
 
-// BuildCallGraph orders frames from the entry point to the throw site, merging consecutive
-// calls of the same class and collapsing vendor runs into one node with their packages.
+// BuildCallGraph упорядочивает кадры от точки входа к месту исключения, объединяя подряд идущие
+// вызовы одного класса и схлопывая серии vendor-кадров в один узел со списком их пакетов.
 func BuildCallGraph(frames []StackFrame) []CallNode {
 	var nodes []CallNode
 	for i := len(frames) - 1; i >= 0; i-- {
@@ -261,7 +259,7 @@ func BuildCallGraph(frames []StackFrame) []CallNode {
 	return nodes
 }
 
-// vendorPackage returns "laravel/framework" for ".../vendor/laravel/framework/src/...".
+// vendorPackage возвращает "laravel/framework" для ".../vendor/laravel/framework/src/...".
 func vendorPackage(path string) string {
 	path = strings.ReplaceAll(path, `\`, "/")
 	idx := strings.LastIndex(path, "vendor/")

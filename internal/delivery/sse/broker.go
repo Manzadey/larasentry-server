@@ -64,14 +64,14 @@ func (b *Broker) Broadcast(msg []byte) {
 	}
 }
 
-// BroadcastIncident notifies UI clients that an incident changed.
+// BroadcastIncident уведомляет UI-клиентов об изменении инцидента.
 // Отправляется только id: UI сам перезапрашивает список с текущими фильтрами,
 // а многострочный HTML в одной строке data: браузер обрезает до первой строки.
 func (b *Broker) BroadcastIncident(inc domain.Incident) {
 	b.Broadcast([]byte(fmt.Sprintf("event: new-incident\ndata: %d\n\n", inc.ID)))
 }
 
-// BroadcastJSON sends a typed JSON event to connected API clients
+// BroadcastJSON отправляет типизированное JSON-событие подключённым API-клиентам.
 func (b *Broker) BroadcastJSON(eventType string, data any) {
 	bytesData, err := json.Marshal(data)
 	if err != nil {

@@ -11,7 +11,7 @@ import (
 	"sync"
 )
 
-// CalculateHash computes MD5 hash from event payload and project key
+// CalculateHash считает MD5 от ключа проекта и payload события.
 func CalculateHash(projectKey string, payload domain.EventPayload) string {
 	var hashInput string
 	if len(payload.Fingerprint) > 0 {
@@ -60,17 +60,15 @@ func (p *Processor) Start() {
 }
 
 func (p *Processor) processEvent(ctx context.Context, event domain.IncomingEvent) {
-	// 1. Calculate hash
 	hash := CalculateHash(event.ProjectKey, event.Payload)
 
-	// 2. UPSERT in Database
 	res, err := p.repo.UpsertIncident(ctx, event, hash)
 	if err != nil {
 		log.Printf("Error upserting incident: %v", err)
 		return
 	}
 
-	// 3. Update alert buffer only if not ignored (resolved old versions or ignored issues are silenced)
+	// Решённые в старых версиях и проигнорированные инциденты не попадают в буфер алертов
 	if !res.Ignored {
 		p.mu.Lock()
 		if existing, exists := p.alertBuffer[hash]; exists {
@@ -86,7 +84,6 @@ func (p *Processor) processEvent(ctx context.Context, event domain.IncomingEvent
 		p.mu.Unlock()
 	}
 
-	// 4. SSE Realtime Broadcast
 	p.mu.Lock()
 	callback := p.onIncident
 	jsonCallback := p.onJSONEvent

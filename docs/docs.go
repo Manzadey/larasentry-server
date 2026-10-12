@@ -1556,7 +1556,7 @@ const docTemplate = `{
                     "type": "string"
                 },
                 "version": {
-                    "description": "target version if type == \"version\"",
+                    "description": "целевая версия, если type == \"version\"",
                     "type": "string"
                 }
             }

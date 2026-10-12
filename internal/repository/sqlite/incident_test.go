@@ -40,7 +40,6 @@ func TestIncidentLifecycleAndRegression(t *testing.T) {
 
 	ctx := context.Background()
 
-	// 1. New event in version 1.0.0
 	evt1 := domain.IncomingEvent{
 		ProjectID:   1,
 		ProjectName: "Default Project",
@@ -63,7 +62,6 @@ func TestIncidentLifecycleAndRegression(t *testing.T) {
 		t.Errorf("unexpected res1: %+v", res1)
 	}
 
-	// Verify incident in DB
 	inc, err := incRepo.GetIncidentByID(ctx, res1.IncidentID)
 	if err != nil {
 		t.Fatalf("GetIncidentByID failed: %v", err)
@@ -72,7 +70,6 @@ func TestIncidentLifecycleAndRegression(t *testing.T) {
 		t.Errorf("expected unresolved status and 1.0.0 first release, got: %+v", inc)
 	}
 
-	// 2. Resolve incident in version 1.0.0
 	if err := incRepo.ResolveIncident(ctx, inc.ID, "version", "1.0.0"); err != nil {
 		t.Fatalf("ResolveIncident failed: %v", err)
 	}
@@ -82,7 +79,7 @@ func TestIncidentLifecycleAndRegression(t *testing.T) {
 		t.Errorf("expected resolved status in 1.0.0, got: %+v", inc)
 	}
 
-	// 3. Old event arrives from version 0.9.0 -> should be ignored (status remains resolved)
+	// Событие из более старой версии 0.9.0 игнорируется: статус остаётся resolved
 	evtOld := evt1
 	evtOld.Payload.Release = "0.9.0"
 	resOld, err := incRepo.UpsertIncident(ctx, evtOld, hash)
@@ -97,7 +94,7 @@ func TestIncidentLifecycleAndRegression(t *testing.T) {
 		t.Errorf("expected status to remain resolved, got %s", inc.Status)
 	}
 
-	// 4. Newer event arrives from version 1.1.0 -> REGRESSION!
+	// Событие из более новой версии 1.1.0 — это регрессия
 	evtNew := evt1
 	evtNew.Payload.Release = "1.1.0"
 	resNew, err := incRepo.UpsertIncident(ctx, evtNew, hash)
@@ -112,7 +109,6 @@ func TestIncidentLifecycleAndRegression(t *testing.T) {
 		t.Errorf("expected status=unresolved, isRegression=true, got: %+v", inc)
 	}
 
-	// 5. Test Reopen
 	_ = incRepo.ResolveIncident(ctx, inc.ID, "immediate", "")
 	if err := incRepo.ReopenIncident(ctx, inc.ID); err != nil {
 		t.Fatalf("ReopenIncident failed: %v", err)
@@ -180,7 +176,6 @@ func TestIncident_PHPVersionPersistence(t *testing.T) {
 
 	ctx := context.Background()
 
-	// 1. Ingest event with direct PHPVersion and LaravelVersion
 	evt1 := domain.IncomingEvent{
 		ProjectID:   1,
 		ProjectName: "Default Project",
@@ -210,7 +205,7 @@ func TestIncident_PHPVersionPersistence(t *testing.T) {
 		t.Errorf("expected LaravelVersion 11.28.0, got %q", inc1.LaravelVersion)
 	}
 
-	// 2. Ingest event with versions inside tags
+	// Версии могут прийти не в отдельных полях, а внутри tags
 	evt2 := domain.IncomingEvent{
 		ProjectID:   1,
 		ProjectName: "Default Project",
@@ -242,7 +237,6 @@ func TestIncident_PHPVersionPersistence(t *testing.T) {
 		t.Errorf("expected LaravelVersion 10.48.2 from tags, got %q", inc2.LaravelVersion)
 	}
 
-	// 3. Test list incidents returns PHPVersion and LaravelVersion
 	list, err := incRepo.GetIncidents(ctx, domain.IncidentFilter{Status: "all"})
 	if err != nil {
 		t.Fatalf("GetIncidents failed: %v", err)
@@ -265,7 +259,6 @@ func TestIncident_ExtendedContextPersistence(t *testing.T) {
 
 	ctx := context.Background()
 
-	// 1. Ingest event with full extended context
 	maxTries := 5
 	configCached := true
 	evt := domain.IncomingEvent{
@@ -343,7 +336,6 @@ func TestIncident_ExtendedContextPersistence(t *testing.T) {
 		t.Fatalf("GetIncidentByID failed: %v", err)
 	}
 
-	// Verify denormalized fields
 	if inc.RouteName != "orders.checkout" {
 		t.Errorf("expected RouteName 'orders.checkout', got %q", inc.RouteName)
 	}
@@ -360,7 +352,6 @@ func TestIncident_ExtendedContextPersistence(t *testing.T) {
 		t.Errorf("expected LaravelVersion '11.28.0' (synced from system), got %q", inc.LaravelVersion)
 	}
 
-	// Verify structured contexts
 	if inc.Route == nil || inc.Route.Name != "orders.checkout" {
 		t.Fatalf("expected parsed Route, got %+v", inc.Route)
 	}
@@ -396,7 +387,6 @@ func TestIncident_ExtendedContextPersistence(t *testing.T) {
 		t.Errorf("unexpected breadcrumbs: %+v", inc.Breadcrumbs)
 	}
 
-	// 2. Test search by route_name
 	filtered, err := incRepo.GetIncidents(ctx, domain.IncidentFilter{
 		Query:  "orders.checkout",
 		Status: "all",
