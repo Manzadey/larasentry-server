@@ -1,173 +1,50 @@
-<tr id="incident-row-{{.ID}}" 
-    class="group border-b border-slate-800/80 hover:bg-slate-800/50 transition-colors cursor-pointer select-none row-highlight"
-    hx-get="/ui/incidents/{{.ID}}" 
-    hx-target="#detail-panel-content" 
-    hx-swap="innerHTML"
-    onclick="openDrawer()">
-  
-  <!-- Счетчик повторений (Events Count) -->
-  <td class="py-3.5 px-4 w-20">
-    <div class="flex items-center">
-      {{if gt .EventsCount 10}}
-      <span class="inline-flex items-center px-2 py-0.5 rounded-full text-xs font-semibold bg-rose-500/15 text-rose-400 border border-rose-500/30">
-        ×{{.EventsCount}}
+{{$state := "open"}}{{if eq .Status "resolved"}}{{$state = "resolved"}}{{else if eq .Status "ignored"}}{{$state = "ignored"}}{{else if .IsRegression}}{{$state = "regression"}}{{end}}
+<div id="incident-row-{{.ID}}" class="row h-row" data-id="{{.ID}}" data-state="{{$state}}" data-project-id="{{.ProjectID}}"
+     data-status="{{.Status}}" data-regression="{{.IsRegression}}" data-resolved-in="{{.ResolvedInRelease}}"
+     data-resolved-at="{{with .ResolvedAt}}{{.Format "2006-01-02T15:04:05Z07:00"}}{{end}}"
+     data-class="{{.ExceptionClass}}" data-message="{{trim .Message}}">
+  <div class="row-stripe"></div>
+  <div class="row-body">
+    <button type="button" class="row-main" aria-label="Открыть {{.ExceptionClass}}"
+            hx-get="/ui/incidents/{{.ID}}" hx-target="#detail-panel-content" onclick="openDrawer(this)">
+      <span class="row-title-line">
+        <span class="row-title h-row-title"><span class="ns">{{namespace .ExceptionClass}}</span>{{baseName .ExceptionClass}}</span>
+        {{if eq $state "regression"}}<span class="tag tag-amber">Регрессия</span>
+        {{else if eq $state "resolved"}}<span class="tag tag-green">Решена</span>
+        {{else if eq $state "ignored"}}<span class="tag tag-muted">Игнорируется</span>{{end}}
       </span>
-      {{else if gt .EventsCount 1}}
-      <span class="inline-flex items-center px-2 py-0.5 rounded-full text-xs font-semibold bg-amber-500/15 text-amber-400 border border-amber-500/30">
-        ×{{.EventsCount}}
+      <span class="row-msg">{{trim .Message}}</span>
+      <span class="row-meta">
+        <span class="mono" style="color: var(--blue)">{{baseName .File}}:{{.Line}}</span>
+        {{if .LastRelease}}<span class="flex items-center gap-1"><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M7 7h.01M7 3h5c.512 0 1.024.195 1.414.586l7 7a2 2 0 010 2.828l-7 7a2 2 0 01-2.828 0l-7-7A1.994 1.994 0 013 12V7a4 4 0 014-4z"/></svg>{{.LastRelease}}</span>{{end}}
+        {{if .ProjectName}}<span>{{.ProjectName}}</span>{{end}}
+        {{with host .AppURL}}<span>{{.}}</span>{{end}}
+        {{if .PHPVersion}}<span>PHP {{.PHPVersion}}</span>{{end}}
+        {{if eq .ExecutionType "queue"}}<span>Очередь</span>
+        {{else if eq .ExecutionType "console"}}<span>CLI</span>
+        {{else if .RouteName}}<span>{{.RouteName}}</span>
+        {{else if .RequestURL}}<span>{{urlPath .RequestURL}}</span>{{end}}
       </span>
-      {{else}}
-      <span class="inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium bg-slate-800 text-slate-400 border border-slate-700/60">
-        ×1
-      </span>
-      {{end}}
-    </div>
-  </td>
-
-  <!-- Класс ошибки, проект, релиз, статус и сообщение -->
-  <td class="py-3.5 px-4 max-w-md lg:max-w-xl">
-    <div class="flex flex-col gap-1">
-      <!-- Мета-бейджи: Статус, Проект, Сервер, Релиз и Класс ошибки -->
-      <div class="flex items-center flex-wrap gap-1.5">
-        <!-- Статус: Регрессия или Решено -->
-        {{if .IsRegression}}
-        <span class="inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[11px] font-semibold bg-amber-500/20 text-amber-300 border border-amber-500/40 animate-pulse">
-          <svg class="w-3 h-3 text-amber-400" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z"></path></svg>
-          Регрессия
-        </span>
-        {{else if eq .Status "resolved"}}
-        <span class="inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[11px] font-semibold bg-emerald-500/20 text-emerald-300 border border-emerald-500/40">
-          <svg class="w-3 h-3 text-emerald-400" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7"></path></svg>
-          Решено
-        </span>
-        {{end}}
-
-        <!-- Проект -->
-        <span class="inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[11px] font-semibold bg-indigo-500/15 text-indigo-300 border border-indigo-500/30">
-          <svg class="w-3 h-3 text-indigo-400" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M3 7v10a2 2 0 002 2h14a2 2 0 002-2V9a2 2 0 00-2-2h-6l-2-2H5a2 2 0 00-2 2z"></path></svg>
-          {{if .ProjectName}}{{.ProjectName}}{{else}}Default Project{{end}}
-        </span>
-
-        <!-- Релиз -->
-        {{if .LastRelease}}
-        <span class="inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[11px] font-mono bg-purple-500/15 text-purple-300 border border-purple-500/30" title="Релиз: {{.LastRelease}}">
-          <svg class="w-3 h-3 text-purple-400" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M7 7h.01M7 3h5c.512 0 1.024.195 1.414.586l7 7a2 2 0 010 2.828l-7 7a2 2 0 01-2.828 0l-7-7A1.994 1.994 0 013 12V7a4 4 0 014-4z"></path></svg>
-          {{.LastRelease}}
-        </span>
-        {{end}}
-
-        <!-- Сервер / Хост -->
-        {{if .AppURL}}
-        <span class="inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[11px] font-mono bg-sky-500/10 text-sky-300 border border-sky-500/25" title="{{.AppURL}}">
-          <svg class="w-3 h-3 text-sky-400" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 12h14M5 12a2 2 0 01-2-2V6a2 2 0 012-2h14a2 2 0 012 2v4a2 2 0 01-2 2M5 12a2 2 0 00-2 2v4a2 2 0 002 2h14a2 2 0 002-2v-4a2 2 0 00-2-2m-2-4h.01M17 16h.01"></path></svg>
-          {{host .AppURL}}
-        </span>
-        {{end}}
-
-        <!-- Версия PHP -->
-        {{if .PHPVersion}}
-        <span class="inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[11px] font-mono bg-blue-500/15 text-blue-300 border border-blue-500/30" title="PHP {{.PHPVersion}}">
-          PHP {{.PHPVersion}}
-        </span>
-        {{end}}
-
-        <!-- Версия Laravel -->
-        {{if .LaravelVersion}}
-        <span class="inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[11px] font-mono bg-rose-500/15 text-rose-300 border border-rose-500/30" title="Laravel {{.LaravelVersion}}">
-          L{{.LaravelVersion}}
-        </span>
-        {{end}}
-
-        <!-- Тип выполнения: Queue или CLI -->
-        {{if eq .ExecutionType "queue"}}
-        <span class="inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[11px] font-semibold bg-amber-500/15 text-amber-300 border border-amber-500/30" title="Фоновая задача (Queue)">
-          <svg class="w-3 h-3 text-amber-400" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 11H5m14 0a2 2 0 012 2v6a2 2 0 01-2 2H5a2 2 0 01-2-2v-6a2 2 0 012-2m14 0V9a2 2 0 00-2-2M5 11V9a2 2 0 012-2m0 0V5a2 2 0 012-2h6a2 2 0 012 2v2M7 7h10"></path></svg>
-          Queue
-        </span>
-        {{else if eq .ExecutionType "console"}}
-        <span class="inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[11px] font-mono bg-slate-700/50 text-slate-300 border border-slate-600/50" title="Консоль / Artisan">
-          CLI
-        </span>
-        {{end}}
-
-        <!-- Класс ошибки -->
-        <span class="font-mono text-xs font-semibold text-rose-400 group-hover:text-rose-300 transition-colors ml-0.5">
-          {{.ExceptionClass}}
-        </span>
+    </button>
+    <div class="row-side">
+      <div class="row-events{{if gt .EventsCount 1}} many{{end}}"><span class="ls-m" style="font-weight: 400; color: var(--muted)">×</span>{{.EventsCount}}</div>
+      <div class="row-time">
+        <time datetime="{{.LastSeenAt.Format "2006-01-02T15:04:05Z07:00"}}" data-rel style="font-size: 13px; color: var(--text-2)">{{.LastSeenAt.Format "02.01.2006 15:04"}}</time>
+        <span style="font-size: 12px; color: var(--muted)">{{.LastSeenAt.Format "02.01.2006, 15:04"}}</span>
       </div>
-
-      <!-- Сообщение об ошибке (с гарантированным trim) -->
-      <p class="text-sm text-slate-300 group-hover:text-white line-clamp-1 font-normal break-all">{{trim .Message}}</p>
+      <div class="row-act">
+        {{if eq .Status "resolved"}}
+        <button type="button" class="btn btn-icon h-btn" aria-label="Открыть снова" title="Открыть снова"
+                hx-post="/ui/incidents/{{.ID}}/reopen" hx-swap="none">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"/></svg>
+        </button>
+        {{else}}
+        <button type="button" class="btn btn-icon h-btn" aria-label="Отметить решённой" title="Отметить решённой"
+                hx-post="/ui/incidents/{{.ID}}/resolve?type=immediate" hx-swap="none">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M5 13l4 4L19 7"/></svg>
+        </button>
+        {{end}}
+      </div>
     </div>
-  </td>
-
-  <!-- Файл и строка -->
-  <td class="py-3.5 px-4 hidden md:table-cell max-w-xs">
-    <div class="flex flex-col">
-      <span class="font-mono text-xs text-slate-400 truncate" title="{{.File}}">
-        {{.File}}
-      </span>
-      <span class="font-mono text-[11px] text-slate-500">
-        Строка: <strong class="text-slate-400">{{.Line}}</strong>
-      </span>
-    </div>
-  </td>
-
-  <!-- Endpoint / URL запроса -->
-  <td class="py-3.5 px-4 hidden lg:table-cell max-w-[200px]">
-    {{if .RouteName}}
-    <div class="inline-flex items-center font-mono text-xs text-sky-300 bg-sky-950/40 px-2 py-0.5 rounded border border-sky-800/40 truncate max-w-full" title="Route: {{.RouteName}}">
-      {{.RouteName}}
-    </div>
-    {{else if .RequestURL}}
-    <div class="inline-flex items-center font-mono text-xs text-slate-300 bg-slate-800/80 px-2 py-0.5 rounded border border-slate-700/50 truncate max-w-full" title="{{.RequestURL}}">
-      {{.RequestURL}}
-    </div>
-    {{else}}
-    <span class="text-xs text-slate-600">—</span>
-    {{end}}
-  </td>
-
-  <!-- Время последнего появления (Last Seen) -->
-  <td class="py-3.5 px-4 text-right whitespace-nowrap w-36">
-    <div class="text-xs text-slate-300 font-mono">
-      {{.LastSeenAt.Format "15:04:05"}}
-    </div>
-    <div class="text-[11px] text-slate-500">
-      {{.LastSeenAt.Format "02.01.2006"}}
-    </div>
-  </td>
-
-  <!-- Быстрое действие и стрелка -->
-  <td class="py-3.5 px-3 text-right w-20 text-slate-500">
-    <div class="flex items-center justify-end gap-1.5">
-      {{if eq .Status "resolved"}}
-      <button type="button"
-              hx-post="/ui/incidents/{{.ID}}/reopen?view=row"
-              hx-target="#incident-row-{{.ID}}"
-              hx-swap="outerHTML"
-              onclick="event.stopPropagation()"
-              class="p-1.5 rounded-lg text-slate-400 hover:text-amber-300 hover:bg-slate-800 border border-transparent hover:border-slate-700 transition"
-              title="Переоткрыть инцидент">
-        <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"></path></svg>
-      </button>
-      {{else}}
-      <button type="button"
-              hx-post="/ui/incidents/{{.ID}}/resolve?type=immediate&view=row"
-              hx-target="#incident-row-{{.ID}}"
-              hx-swap="outerHTML"
-              onclick="event.stopPropagation()"
-              class="p-1.5 rounded-lg text-slate-400 hover:text-emerald-300 hover:bg-emerald-950/40 border border-transparent hover:border-emerald-600/40 transition"
-              title="Пометить как решённый">
-        <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2.5" d="M5 13l4 4L19 7"></path></svg>
-      </button>
-      {{end}}
-
-      <span class="text-slate-500 group-hover:text-slate-300 transition">
-        <svg class="w-4 h-4 ml-auto inline-block transform group-hover:translate-x-0.5 transition-transform" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5l7 7-7 7" />
-        </svg>
-      </span>
-    </div>
-  </td>
-</tr>
+  </div>
+</div>

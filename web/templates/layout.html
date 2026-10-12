@@ -92,12 +92,10 @@
 <head>
   {{template "head" .}}
   <title>{{block "title" .}}LaraSentry — инциденты{{end}}</title>
-  <script src="https://unpkg.com/htmx-ext-sse@2.2.2/sse.js"></script>
   <style>
     .htmx-indicator { display: none; }
     .htmx-request .htmx-indicator, .htmx-request.htmx-indicator { display: inline-flex; }
-    @keyframes highlightRow { from { background-color: rgba(114,167,255,.12); } to { background-color: transparent; } }
-    .row-highlight { animation: highlightRow 2.5s ease-out; }
+    .live-new { color: #F6CF8E; border-color: rgba(240,168,58,.3); background: rgba(240,168,58,.1); }
     .toast { position: fixed; right: 20px; bottom: 20px; z-index: 60; display: flex; align-items: center; gap: 8px; padding: 10px 14px;
       border-radius: 8px; border: 1px solid var(--line); background: var(--raised); color: var(--text); font-size: 13px;
       box-shadow: 0 12px 32px rgba(0,0,0,.45); opacity: 0; transform: translateY(12px); pointer-events: none; transition: opacity .2s ease, transform .2s ease; }
@@ -117,11 +115,10 @@
         <span id="live-dot" class="w-2 h-2 rounded-full" style="background: var(--green)"></span>
         <span id="live-status-text">Обновляется в реальном времени</span>
       </button>
-      <div id="paused-counter-pill" class="hidden">
-        <button type="button" class="btn h-btn" onclick="flushPausedStream()" style="color: var(--amber)">
-          <span id="paused-count">0</span> новых
-        </button>
-      </div>
+      <button id="live-new-btn" type="button" class="btn live-new h-primary" onclick="flushLive()" hidden>
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"/></svg>
+        <span id="live-new-text"></span>
+      </button>
       <button type="button" class="btn h-btn" onclick="openGitHubModal()" aria-haspopup="dialog">
         <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path fill-rule="evenodd" clip-rule="evenodd" d="M12 2C6.477 2 2 6.484 2 12.017c0 4.425 2.865 8.18 6.839 9.504.5.092.682-.217.682-.483 0-.237-.008-.868-.013-1.703-2.782.605-3.369-1.343-3.369-1.343-.454-1.158-1.11-1.466-1.11-1.466-.908-.62.069-.608.069-.608 1.003.07 1.53 1.032 1.53 1.032.892 1.53 2.341 1.088 2.91.832.092-.647.35-1.088.636-1.338-2.22-.253-4.555-1.113-4.555-4.951 0-1.093.39-1.988 1.029-2.688-.103-.253-.446-1.272.098-2.65 0 0 .84-.27 2.75 1.026A9.564 9.564 0 0112 6.844c.85.004 1.705.115 2.504.337 1.909-1.296 2.747-1.027 2.747-1.027.546 1.379.202 2.398.1 2.651.64.7 1.028 1.595 1.028 2.688 0 3.848-2.339 4.695-4.566 4.943.359.309.678.92.678 1.855 0 1.338-.012 2.419-.012 2.747 0 .268.18.58.688.482A10.019 10.019 0 0022 12.017C22 6.484 17.522 2 12 2z"/></svg>Репозиторий
       </button>
@@ -210,10 +207,70 @@
   </div>
 
   <script>
-    let isLiveActive = true;
-    let pausedQueue = [];
+    const live = { active: true, pending: new Set(), fresh: new Set(), timer: 0 };
 
-    function openDrawer() {
+    function toggleLiveStream() {
+      live.active = !live.active;
+      const btn = document.getElementById('live-toggle-btn');
+      btn.setAttribute('aria-pressed', String(live.active));
+      btn.style.color = live.active ? '' : 'var(--amber)';
+      document.getElementById('live-dot').style.background = live.active ? 'var(--green)' : 'var(--amber)';
+      document.getElementById('live-status-text').textContent = live.active ? 'Обновляется в реальном времени' : 'Обновления на паузе';
+      if (live.active) flushLive();
+    }
+
+    function flushLive() {
+      live.pending.forEach(id => live.fresh.add(id));
+      live.pending.clear();
+      document.getElementById('live-new-btn').hidden = true;
+      if (typeof refreshList === 'function') refreshList();
+    }
+
+    function onLiveIncident(id) {
+      if (!live.active) {
+        live.pending.add(id);
+        const n = live.pending.size;
+        document.getElementById('live-new-text').textContent = `Показать ${n} ${plural(n, 'новую', 'новые', 'новых')}`;
+        document.getElementById('live-new-btn').hidden = false;
+        return;
+      }
+      live.fresh.add(id);
+      clearTimeout(live.timer);
+      // ponytail: каждое событие перезапрашивает до 100 строк; при шторме событий спасает только дебаунс
+      live.timer = setTimeout(refreshList, 1000);
+    }
+
+    if (document.getElementById('incident-list')) {
+      new EventSource('/ui/events/stream').addEventListener('new-incident', e => onLiveIncident(e.data));
+    }
+
+    function plural(n, one, few, many) {
+      const m10 = n % 10, m100 = n % 100;
+      if (m10 === 1 && m100 !== 11) return one;
+      if (m10 >= 2 && m10 <= 4 && (m100 < 12 || m100 > 14)) return few;
+      return many;
+    }
+
+    const relativeTime = new Intl.RelativeTimeFormat('ru', { numeric: 'auto' });
+    const timeUnits = [['year', 31536000], ['month', 2592000], ['day', 86400], ['hour', 3600], ['minute', 60]];
+
+    function formatRelativeTimes(root) {
+      root.querySelectorAll('time[data-rel]').forEach(t => {
+        const diff = (new Date(t.dateTime) - Date.now()) / 1000;
+        if (Math.abs(diff) < 60) { t.textContent = 'только что'; return; }
+        const [unit, sec] = timeUnits.find(([, s]) => Math.abs(diff) >= s);
+        t.textContent = relativeTime.format(Math.round(diff / sec), unit);
+      });
+    }
+    htmx.onLoad(formatRelativeTimes);
+    setInterval(() => formatRelativeTimes(document), 60000);
+
+    let drawerSource = null;
+
+    function openDrawer(source) {
+      drawerSource = source || null;
+      document.getElementById('detail-panel-content').innerHTML = '';
+      markSelectedRow();
       document.getElementById('detail-drawer').classList.add('open');
       document.getElementById('drawer-backdrop').classList.add('open');
     }
@@ -221,37 +278,101 @@
     function closeDrawer() {
       document.getElementById('detail-drawer').classList.remove('open');
       document.getElementById('drawer-backdrop').classList.remove('open');
+      const row = drawerSource && drawerSource.closest('.row');
+      drawerSource = null;
+      markSelectedRow();
+      if (row) {
+        const fresh = document.getElementById(row.id);
+        if (fresh) fresh.querySelector('.row-main').focus();
+      }
     }
 
     function isDrawerOpen() {
       return document.getElementById('detail-drawer').classList.contains('open');
     }
 
-    function toggleLiveStream() {
-      isLiveActive = !isLiveActive;
-      const btn = document.getElementById('live-toggle-btn');
-      btn.setAttribute('aria-pressed', String(isLiveActive));
-      document.getElementById('live-dot').style.background = isLiveActive ? 'var(--green)' : 'var(--amber)';
-      document.getElementById('live-status-text').textContent = isLiveActive ? 'Обновляется в реальном времени' : 'Обновления на паузе';
-      btn.style.color = isLiveActive ? '' : 'var(--amber)';
-      if (isLiveActive) flushPausedStream();
+    function markSelectedRow() {
+      const selectedId = drawerSource && drawerSource.closest('.row') ? drawerSource.closest('.row').id : null;
+      document.querySelectorAll('.row').forEach(r => r.classList.toggle('is-selected', r.id === selectedId));
     }
 
-    function flushPausedStream() {
-      const tbody = document.getElementById('incidents-table-body');
-      while (pausedQueue.length > 0) {
-        tbody.insertAdjacentHTML('afterbegin', pausedQueue.shift());
+    // afterSettle, а не afterSwap: при settle htmx возвращает строкам с тем же id прежние class
+    document.addEventListener('htmx:afterSettle', e => {
+      if (e.detail.target.id !== 'incident-list') return;
+      if (drawerSource) {
+        const row = document.getElementById(drawerSource.closest('.row').id);
+        drawerSource = row ? row.querySelector('.row-main') : null;
       }
-      document.getElementById('paused-counter-pill').classList.add('hidden');
-      document.getElementById('paused-count').textContent = '0';
+      markSelectedRow();
+      live.fresh.forEach(id => {
+        const row = document.getElementById('incident-row-' + id);
+        if (row) row.classList.add('row-highlight');
+      });
+      live.fresh.clear();
+    });
+
+    function ddOpen(dd) {
+      document.querySelectorAll('[data-dd]').forEach(other => other !== dd && ddClose(other));
+      const list = dd.querySelector('[role=listbox]');
+      list.hidden = false;
+      dd.querySelector('.dd-btn').setAttribute('aria-expanded', 'true');
+      (list.querySelector('[aria-selected=true]') || list.querySelector('[role=option]')).focus();
     }
 
-    document.addEventListener('htmx:sseBeforeMessage', function(evt) {
-      if (!isLiveActive) {
-        evt.preventDefault();
-        pausedQueue.push(evt.detail.data);
-        document.getElementById('paused-counter-pill').classList.remove('hidden');
-        document.getElementById('paused-count').textContent = pausedQueue.length;
+    function ddClose(dd, focusButton) {
+      const list = dd.querySelector('[role=listbox]');
+      if (list.hidden) return false;
+      list.hidden = true;
+      dd.querySelector('.dd-btn').setAttribute('aria-expanded', 'false');
+      if (focusButton) dd.querySelector('.dd-btn').focus();
+      return true;
+    }
+
+    function ddSelect(dd, option, notify = true) {
+      if (!option) return;
+      dd.querySelectorAll('[role=option]').forEach(o => o.setAttribute('aria-selected', String(o === option)));
+      dd.querySelector('input[type=hidden]').value = option.dataset.value;
+      const button = dd.querySelector('.dd-btn');
+      dd.querySelector('.dd-label').textContent = option.dataset.label;
+      button.setAttribute('aria-label', button.getAttribute('aria-label').replace(/:.*$/, ': ' + option.dataset.label));
+      if (notify) dd.dispatchEvent(new CustomEvent('dd-change', { bubbles: true }));
+    }
+
+    document.addEventListener('click', e => {
+      const dd = e.target.closest('[data-dd]');
+      document.querySelectorAll('[data-dd]').forEach(other => other !== dd && ddClose(other));
+      if (!dd) return;
+      if (e.target.closest('.dd-btn')) {
+        dd.querySelector('[role=listbox]').hidden ? ddOpen(dd) : ddClose(dd);
+        return;
+      }
+      const option = e.target.closest('[role=option]');
+      if (option) {
+        ddSelect(dd, option);
+        ddClose(dd, true);
+      }
+    });
+
+    document.addEventListener('keydown', e => {
+      const dd = e.target.closest && e.target.closest('[data-dd]');
+      if (!dd) return;
+      if (e.target.closest('.dd-btn') && ['ArrowDown', 'ArrowUp'].includes(e.key)) {
+        e.preventDefault();
+        ddOpen(dd);
+        return;
+      }
+      const options = [...dd.querySelectorAll('[role=option]')];
+      const index = options.indexOf(e.target);
+      if (index < 0) return;
+      const moves = { ArrowDown: index + 1, ArrowUp: index - 1, Home: 0, End: options.length - 1 };
+      if (e.key in moves) {
+        e.preventDefault();
+        options[Math.max(0, Math.min(options.length - 1, moves[e.key]))].focus();
+      } else if (e.key === 'Escape') {
+        e.preventDefault();
+        ddClose(dd, true);
+      } else if (e.key === 'Tab') {
+        ddClose(dd);
       }
     });
 
@@ -393,6 +514,7 @@
     }
 
     document.addEventListener('keydown', function(e) {
+      if (e.defaultPrevented) return;
       if (e.key === 'Escape') {
         const ghModal = document.getElementById('github-modal');
         if (ghModal && !ghModal.classList.contains('hidden')) {

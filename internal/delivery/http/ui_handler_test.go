@@ -111,7 +111,6 @@ func (m *mockIncidentRepo) GetStatsSummary(ctx context.Context, projectID int64)
 	return &domain.StatsSummary{TotalIncidents: 1}, nil
 }
 
-
 func TestHandleIncidentDetail_WithStackTraceFilter(t *testing.T) {
 	sampleTrace := `#0 /var/www/html/vendor/laravel/framework/src/Illuminate/Database/Connection.php(712): Illuminate\Database\Connection->runQueryCallback()
 #1 /var/www/html/app/Http/Controllers/UserController.php(42): App\Models\User::all()
@@ -460,8 +459,6 @@ func TestHandleIncidentDetail_ExtendedContextTabs(t *testing.T) {
 	}
 }
 
-
-
 func renderIncidentDetail(t *testing.T, inc *domain.Incident) string {
 	t.Helper()
 	handler, err := NewUIHandler(&mockProjectRepo{}, &mockIncidentRepo{incident: inc}, &mockReleaseRepo{}, sse.NewBroker())
@@ -523,5 +520,13 @@ func TestHandleIncidentDetail_AppContextKeepsAmpersandReadable(t *testing.T) {
 
 	if strings.Contains(body, `\u0026`) || !strings.Contains(body, "a=1&amp;b=2") {
 		t.Errorf("expected URL with readable ampersand in rendered HTML")
+	}
+}
+
+func TestPlural(t *testing.T) {
+	for n, want := range map[int]string{0: "ошибок", 1: "ошибка", 3: "ошибки", 5: "ошибок", 11: "ошибок", 12: "ошибок", 21: "ошибка", 22: "ошибки", 111: "ошибок"} {
+		if got := plural(n, "ошибка", "ошибки", "ошибок"); got != want {
+			t.Errorf("plural(%d) = %q, want %q", n, got, want)
+		}
 	}
 }

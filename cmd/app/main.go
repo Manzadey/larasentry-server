@@ -94,7 +94,7 @@ func main() {
 	uiHandler.SetGitHubAccounts(githubAccountRepo, usecase.NewGitHubAccounts(githubAccountRepo, githubClient))
 
 	processor.SetOnIncident(func(inc domain.Incident) {
-		sseBroker.BroadcastIncident(inc, uiHandler.GetRowTemplate())
+		sseBroker.BroadcastIncident(inc)
 	})
 
 	// 7. Setup HTTP Server

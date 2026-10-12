@@ -2,6 +2,7 @@ package http
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -55,6 +56,21 @@ func NewUIHandler(
 				return rawURL
 			}
 			return u.Host
+		},
+		"urlPath": func(rawURL string) string {
+			u, err := url.Parse(strings.TrimSpace(rawURL))
+			if err != nil || u.Path == "" {
+				return rawURL
+			}
+			return u.Path
+		},
+		"baseName": baseName,
+		"plural":   plural,
+		"ddOption": func(value, label, hint string, selected bool) map[string]any {
+			return map[string]any{"Value": value, "Label": label, "Hint": hint, "Selected": selected}
+		},
+		"namespace": func(s string) string {
+			return strings.TrimSuffix(s, baseName(s))
 		},
 		"formatBytes": func(b int64) string {
 			if b <= 0 {
@@ -133,39 +149,68 @@ func (h *UIHandler) SetGitHubClient(client *github.Client) {
 	h.githubClient = client
 }
 
-// GetRowTemplate returns the parsed single row template for SSE broadcasting
-func (h *UIHandler) GetRowTemplate() *template.Template {
-	return h.tmpl.Lookup("incident_row.html")
+// parseListFilter reads list filters shared by the page and the HTMX partial.
+func parseListFilter(r *http.Request) domain.IncidentFilter {
+	q := r.URL.Query()
+	filter := domain.IncidentFilter{
+		Query:  strings.TrimSpace(q.Get("q")),
+		Status: q.Get("status"),
+		Sort:   q.Get("sort"),
+		Limit:  100,
+	}
+	if filter.Status == "" {
+		filter.Status = "unresolved"
+	}
+	if filter.Sort == "" {
+		filter.Sort = "recent"
+	}
+	filter.ProjectID, _ = strconv.ParseInt(q.Get("project_id"), 10, 64)
+	return filter
+}
+
+// listData collects rows and status segment counters for the selected project.
+func (h *UIHandler) listData(ctx context.Context, filter domain.IncidentFilter) (map[string]interface{}, error) {
+	incidents, err := h.incidentRepo.GetIncidents(ctx, filter)
+	if err != nil {
+		return nil, err
+	}
+	totalIncidents, _ := h.incidentRepo.CountIncidents(ctx, filter.ProjectID, "all")
+	totalUnresolved, _ := h.incidentRepo.CountIncidents(ctx, filter.ProjectID, "unresolved")
+	totalResolved, _ := h.incidentRepo.CountIncidents(ctx, filter.ProjectID, "resolved")
+	return map[string]interface{}{
+		"Incidents":       incidents,
+		"TotalIncidents":  totalIncidents,
+		"TotalUnresolved": totalUnresolved,
+		"TotalResolved":   totalResolved,
+		"SelectedStatus":  filter.Status,
+	}, nil
 }
 
 // HandleIndex renders the main dashboard page (/ui)
 func (h *UIHandler) HandleIndex(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
+	filter := parseListFilter(r)
+
+	data, err := h.listData(ctx, filter)
+	if err != nil {
+		log.Printf("Error getting incidents: %v", err)
+		data = map[string]interface{}{"SelectedStatus": filter.Status}
+	}
 
 	projects, err := h.projectRepo.GetAllProjects(ctx)
 	if err != nil {
 		log.Printf("Error getting projects: %v", err)
 	}
-
-	status := r.URL.Query().Get("status")
-	if status == "" {
-		status = "unresolved"
+	projectCounts := make(map[int64]int, len(projects))
+	latestReleases := make(map[int64]string, len(projects))
+	for _, p := range projects {
+		projectCounts[p.ID], _ = h.incidentRepo.CountIncidents(ctx, p.ID, "all")
+		if h.releaseRepo != nil {
+			if rel, _ := h.releaseRepo.GetLatestRelease(ctx, p.ID); rel != nil {
+				latestReleases[p.ID] = rel.Version
+			}
+		}
 	}
-
-	filter := domain.IncidentFilter{
-		Limit:  100,
-		Sort:   "recent",
-		Status: status,
-	}
-
-	incidents, err := h.incidentRepo.GetIncidents(ctx, filter)
-	if err != nil {
-		log.Printf("Error getting incidents: %v", err)
-	}
-
-	totalIncidents, _ := h.incidentRepo.CountIncidents(ctx, 0, "all")
-	totalUnresolved, _ := h.incidentRepo.CountIncidents(ctx, 0, "unresolved")
-	totalResolved, _ := h.incidentRepo.CountIncidents(ctx, 0, "resolved")
 
 	var repoGroups []repoGroup
 	if h.githubAccounts != nil {
@@ -176,17 +221,13 @@ func (h *UIHandler) HandleIndex(w http.ResponseWriter, r *http.Request) {
 		repoGroups = groupReposByAccount(repos)
 	}
 
-	data := map[string]interface{}{
-		"Projects":          projects,
-		"GitHubRepoGroups":  repoGroups,
-		"Incidents":         incidents,
-		"TotalIncidents":    totalIncidents,
-		"TotalUnresolved":   totalUnresolved,
-		"TotalResolved":     totalResolved,
-		"SelectedProjectID": int64(0),
-		"SelectedStatus":    status,
-		"Query":             "",
-	}
+	data["Projects"] = projects
+	data["ProjectCounts"] = projectCounts
+	data["LatestReleases"] = latestReleases
+	data["GitHubRepoGroups"] = repoGroups
+	data["SelectedProjectID"] = filter.ProjectID
+	data["SelectedSort"] = filter.Sort
+	data["Query"] = filter.Query
 
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
 	if err := h.tmpl.ExecuteTemplate(w, "index.html", data); err != nil {
@@ -195,44 +236,15 @@ func (h *UIHandler) HandleIndex(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
-// HandleIncidents returns filtered incident rows (HTMX partial)
+// HandleIncidents returns filtered incident rows plus out-of-band segment counters (HTMX partial)
 func (h *UIHandler) HandleIncidents(w http.ResponseWriter, r *http.Request) {
-	ctx := r.Context()
-
-	q := strings.TrimSpace(r.URL.Query().Get("q"))
-	sort := r.URL.Query().Get("sort")
-	if sort == "" {
-		sort = "recent"
-	}
-
-	status := r.URL.Query().Get("status")
-	if status == "" {
-		status = "unresolved"
-	}
-
-	var projectID int64
-	if projStr := r.URL.Query().Get("project_id"); projStr != "" {
-		projectID, _ = strconv.ParseInt(projStr, 10, 64)
-	}
-
-	filter := domain.IncidentFilter{
-		ProjectID: projectID,
-		Query:     q,
-		Status:    status,
-		Sort:      sort,
-		Limit:     100,
-	}
-
-	incidents, err := h.incidentRepo.GetIncidents(ctx, filter)
+	data, err := h.listData(r.Context(), parseListFilter(r))
 	if err != nil {
 		log.Printf("Error searching incidents: %v", err)
 		http.Error(w, "Failed to load incidents", http.StatusInternalServerError)
 		return
 	}
-
-	data := map[string]interface{}{
-		"Incidents": incidents,
-	}
+	data["OOB"] = true
 
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
 	if err := h.tmpl.ExecuteTemplate(w, "incident_rows.html", data); err != nil {
@@ -271,7 +283,7 @@ func (h *UIHandler) HandleIncidentDetail(w http.ResponseWriter, r *http.Request)
 				http.Error(w, "Failed to resolve incident", http.StatusInternalServerError)
 				return
 			}
-			// Add HX-Trigger header so HTMX refreshes the main table counters
+			// incident-updated перезагружает список и счётчики сегментов
 			w.Header().Set("HX-Trigger", "incident-updated")
 		} else if action == "reopen" && r.Method == http.MethodPost {
 			if err := h.incidentRepo.ReopenIncident(ctx, id); err != nil {
@@ -418,4 +430,21 @@ func (h *UIHandler) HandleUpdateProjectGitHubSettings(w http.ResponseWriter, r *
 
 	w.Header().Set("HX-Trigger", "github-settings-updated")
 	http.Redirect(w, r, "/ui", http.StatusSeeOther)
+}
+
+// baseName returns the last segment of a PHP class name or a file path.
+func baseName(s string) string {
+	return s[strings.LastIndexAny(s, `\/`)+1:]
+}
+
+// plural picks the Russian word form for n: plural(n, "ошибка", "ошибки", "ошибок").
+func plural(n int, one, few, many string) string {
+	switch m10, m100 := n%10, n%100; {
+	case m10 == 1 && m100 != 11:
+		return one
+	case m10 >= 2 && m10 <= 4 && (m100 < 12 || m100 > 14):
+		return few
+	default:
+		return many
+	}
 }

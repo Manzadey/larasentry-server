@@ -1,10 +1,8 @@
 package sse
 
 import (
-	"bytes"
 	"encoding/json"
 	"fmt"
-	"html/template"
 	"log"
 	"server/internal/domain"
 	"sync"
@@ -66,17 +64,11 @@ func (b *Broker) Broadcast(msg []byte) {
 	}
 }
 
-// BroadcastIncident formats an incident as an SSE event containing HTML
-func (b *Broker) BroadcastIncident(inc domain.Incident, rowTmpl *template.Template) {
-	var buf bytes.Buffer
-	if err := rowTmpl.Execute(&buf, inc); err != nil {
-		log.Printf("[SSE] Error rendering template for broadcast: %v", err)
-		return
-	}
-
-	htmlContent := buf.String()
-	eventPayload := fmt.Sprintf("event: new-incident\ndata: %s\n\n", htmlContent)
-	b.Broadcast([]byte(eventPayload))
+// BroadcastIncident notifies UI clients that an incident changed.
+// Отправляется только id: UI сам перезапрашивает список с текущими фильтрами,
+// а многострочный HTML в одной строке data: браузер обрезает до первой строки.
+func (b *Broker) BroadcastIncident(inc domain.Incident) {
+	b.Broadcast([]byte(fmt.Sprintf("event: new-incident\ndata: %d\n\n", inc.ID)))
 }
 
 // BroadcastJSON sends a typed JSON event to connected API clients
