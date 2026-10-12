@@ -3,6 +3,7 @@ package http
 import (
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 )
 
@@ -41,5 +42,18 @@ func TestIPAllowlist(t *testing.T) {
 				t.Errorf("got %d, want %d", rec.Code, tc.want)
 			}
 		})
+	}
+}
+
+func TestDefaultGateway(t *testing.T) {
+	table := "Iface\tDestination\tGateway \tFlags\tRefCnt\tUse\tMetric\tMask\t\tMTU\tWindow\tIRTT\n" +
+		"eth0\t00000000\t010012AC\t0003\t0\t0\t0\t00000000\t0\t0\t0\n" +
+		"eth0\t000012AC\t00000000\t0001\t0\t0\t0\t0000FFFF\t0\t0\t0\n"
+	gw, ok := defaultGateway(table)
+	if !ok || gw.String() != "172.18.0.1" {
+		t.Fatalf("got %v %v, want 172.18.0.1", gw, ok)
+	}
+	if _, ok := defaultGateway(table[:strings.Index(table, "\n")+1]); ok {
+		t.Error("table without default route must not yield a gateway")
 	}
 }

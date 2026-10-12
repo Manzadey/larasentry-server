@@ -20,7 +20,7 @@ DB_PATH=/app/data/tracker.db
 TG_BOT_TOKEN=your-telegram-bot-token
 TG_CHAT_ID=your-chat-id
 ALERT_INTERVAL=5m
-ALLOWED_IPS=203.0.113.10,172.17.0.1 # IP, которым открыт /api/*, через запятую; пусто — только с этого хоста
+ALLOWED_IPS=203.0.113.10 # IP, которым открыт /api/*, через запятую; пусто — только с хоста, где запущен сервис
 ```
 3. Start the server:
 ```bash
