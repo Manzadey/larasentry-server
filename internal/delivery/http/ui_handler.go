@@ -106,6 +106,7 @@ func NewUIHandler(
 		"templates/partials/incident_rows.html",
 		"templates/partials/incident_row.html",
 		"templates/partials/incident_detail.html",
+		"templates/github.html",
 	)
 	if err != nil {
 		return nil, fmt.Errorf("failed to parse templates: %w", err)

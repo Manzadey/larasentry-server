@@ -154,6 +154,11 @@ func main() {
 	mux.HandleFunc("/ui/incidents", uiHandler.HandleIncidents)
 	mux.HandleFunc("/ui/incidents/", uiHandler.HandleIncidentDetail)
 	mux.HandleFunc("POST /ui/projects/github-settings", uiHandler.HandleUpdateProjectGitHubSettings)
+	mux.HandleFunc("GET /ui/github", uiHandler.HandleGitHubPage)
+	mux.HandleFunc("POST /ui/github/accounts", uiHandler.HandleCreateGitHubAccount)
+	mux.HandleFunc("POST /ui/github/accounts/{id}/sync", uiHandler.HandleSyncGitHubAccount)
+	mux.HandleFunc("POST /ui/github/accounts/{id}/delete", uiHandler.HandleDeleteGitHubAccount)
+	mux.HandleFunc("POST /ui/github/accounts/{id}/repos", uiHandler.HandleSaveGitHubRepos)
 	mux.HandleFunc("/ui/events/stream", uiHandler.HandleEventsStream)
 
 	// Root redirect
