@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"net/url"
 	"strings"
 	"testing"
 	"time"
@@ -315,6 +316,17 @@ func TestHandleUpdateProjectGitHubSettings_Form(t *testing.T) {
 	}
 	if rec.Header().Get("HX-Trigger") != "github-settings-updated" {
 		t.Errorf("expected HX-Trigger 'github-settings-updated'")
+	}
+
+	for returnTo, want := range map[string]string{"/ui/github": "/ui/github", "https://evil.example": "/ui"} {
+		form := strings.NewReader("project_id=1&github_repo_id=7&return_to=" + url.QueryEscape(returnTo))
+		req := httptest.NewRequest(http.MethodPost, "/ui/projects/github-settings", form)
+		req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+		rec := httptest.NewRecorder()
+		handler.HandleUpdateProjectGitHubSettings(rec, req)
+		if got := rec.Header().Get("Location"); got != want {
+			t.Errorf("return_to=%q: redirected to %q, want %q", returnTo, got, want)
+		}
 	}
 }
 

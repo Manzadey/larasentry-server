@@ -136,7 +136,7 @@ func (inc Incident) StackTraceStats() StackTraceStats {
 // или "#3 [internal function]: Class->method(args)".
 var (
 	frameLineRegex = regexp.MustCompile(`^#?(\d+)\s+(.*?)(?:\((\d+)\))?:\s+(.*)$`)
-	frameCallRegex = regexp.MustCompile(`^(.*?)(->|::)([^(]*)`)
+	frameCallRegex = regexp.MustCompile(`^([^(]*?)(->|::)([^(]*)`)
 )
 
 // StackFrame is one parsed frame of a PHP stack trace.

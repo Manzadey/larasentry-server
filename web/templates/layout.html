@@ -31,6 +31,7 @@
 {{define "github-modal"}}
 <dialog id="github-modal" class="modal modal-gh" aria-labelledby="gh-title">
   <form action="/ui/projects/github-settings" method="POST">
+    <input type="hidden" name="return_to" value="{{if .GitHubPage}}/ui/github{{else}}/ui{{end}}">
     <div class="modal-head">
       <div class="flex items-center justify-between gap-3">
         <h2 id="gh-title" class="flex items-center gap-2">
@@ -547,6 +548,15 @@
     <div id="detail-panel-content" class="h-full flex flex-col"></div>
   </aside>
 
+  <template id="drawer-error-template">
+    <div class="dh">
+      <button type="button" class="btn btn-icon btn-ghost h-ghost dh-close" onclick="closeDrawer()" aria-label="Закрыть" title="Закрыть">
+        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M6 18L18 6M6 6l12 12"/></svg>
+      </button>
+      <p class="note-dashed" role="alert" style="margin-top: 40px"></p>
+    </div>
+  </template>
+
   <div id="toast" class="toast" role="status" aria-live="polite">
     <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="var(--green)" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M5 13l4 4L19 7"/></svg>
     <span id="toast-message"></span>
@@ -653,9 +663,12 @@
         return;
       }
       live.fresh.add(id);
-      clearTimeout(live.timer);
-      // ponytail: каждое событие перезапрашивает до 100 строк; при шторме событий спасает только дебаунс
-      live.timer = setTimeout(refreshList, 1000);
+      // Троттлинг, а не дебаунс: при событиях чаще раза в секунду дебаунс не обновил бы список ни разу
+      if (live.timer) return;
+      live.timer = setTimeout(() => {
+        live.timer = 0;
+        refreshList();
+      }, 1000);
     }
 
     if (document.getElementById('incident-list')) {
@@ -706,6 +719,18 @@
       if (row) row.querySelector('.row-main').focus();
     }
 
+    function showDrawerError(e) {
+      if (e.detail.target.id !== 'detail-panel-content') return;
+      const notFound = e.detail.xhr && e.detail.xhr.status === 404;
+      const box = document.getElementById('detail-panel-content');
+      box.innerHTML = document.getElementById('drawer-error-template').innerHTML;
+      box.querySelector('[role=alert]').textContent = notFound
+        ? 'Ошибка не найдена: возможно, её уже удалила очистка инцидентов старше 30 дней.'
+        : 'Не удалось загрузить ошибку. Проверьте соединение и откройте её ещё раз.';
+    }
+    document.addEventListener('htmx:responseError', showDrawerError);
+    document.addEventListener('htmx:sendError', showDrawerError);
+
     function isDrawerOpen() {
       return document.getElementById('detail-drawer').classList.contains('open');
     }
@@ -714,8 +739,9 @@
       document.querySelectorAll('.row').forEach(r => r.classList.toggle('is-selected', r.id === drawerRowId));
     }
 
-    function restoreFocusAfterRefresh() {
-      const el = focusAfterRefresh && document.querySelector(focusAfterRefresh);
+    // Ищем только внутри обновлённой цели: в чужой цели элемент ещё старый и сейчас будет заменён
+    function restoreFocusAfterRefresh(target) {
+      const el = focusAfterRefresh && target.querySelector(focusAfterRefresh);
       if (el) {
         el.focus();
         focusAfterRefresh = null;
@@ -733,13 +759,13 @@
         const title = document.getElementById('drawer-title');
         if (title) title.focus();
       }
-      restoreFocusAfterRefresh();
+      restoreFocusAfterRefresh(e.detail.target);
     });
 
     // afterSettle, а не afterSwap: при settle htmx возвращает строкам с тем же id прежние class
     document.addEventListener('htmx:afterSettle', e => {
       if (e.detail.target.id !== 'incident-list') return;
-      restoreFocusAfterRefresh();
+      restoreFocusAfterRefresh(e.detail.target);
       markSelectedRow();
       live.fresh.forEach(id => {
         const row = document.getElementById('incident-row-' + id);
@@ -836,7 +862,7 @@
 
     async function runIncidentAction(inc, action, params) {
       const row = dialogSource && dialogSource.closest('.row');
-      focusAfterRefresh = row ? `#${row.id} .row-act button` : '#incident-detail .dh-top > .btn';
+      focusAfterRefresh = row ? `#incident-act-${inc.id}` : '#drawer-action';
       try {
         await postIncident(inc.id, action, params);
       } catch (err) {

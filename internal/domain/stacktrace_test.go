@@ -139,6 +139,9 @@ func TestParseFramesGroupsAndCallGraph(t *testing.T) {
 	if f := frames[5]; !f.Vendor || f.Class != "" || f.Method != "handle" {
 		t.Errorf("unexpected function frame: %+v", f)
 	}
+	if f := ParseFrames(`#0 /app/helpers.php(9): app('App\\Foo::bar')`)[0]; f.Class != "" || f.Method != "app" {
+		t.Errorf("a :: inside arguments must not split a plain function call: %+v", f)
+	}
 
 	var shape []int
 	for _, g := range GroupFrames(frames) {

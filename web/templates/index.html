@@ -155,9 +155,9 @@
 {{define "segments"}}
 <div id="status-segments" class="segments" role="group" aria-label="Статус"{{if .OOB}} hx-swap-oob="true"{{end}}>
   <input type="hidden" name="status" value="{{.SelectedStatus}}">
-  <button type="button" class="seg h-seg" data-status="unresolved" aria-pressed="{{eq .SelectedStatus "unresolved"}}" style="--c: var(--red)">Открытые<span class="seg-count">{{.TotalUnresolved}}</span></button>
-  <button type="button" class="seg h-seg" data-status="resolved" aria-pressed="{{eq .SelectedStatus "resolved"}}" style="--c: var(--green)">Решённые<span class="seg-count">{{.TotalResolved}}</span></button>
-  <button type="button" class="seg h-seg" data-status="all" aria-pressed="{{eq .SelectedStatus "all"}}" style="--c: var(--muted)">Все<span class="seg-count">{{.TotalIncidents}}</span></button>
+  <button type="button" id="seg-unresolved" class="seg h-seg" data-status="unresolved" aria-pressed="{{eq .SelectedStatus "unresolved"}}" style="--c: var(--red)">Открытые<span class="seg-count">{{.TotalUnresolved}}</span></button>
+  <button type="button" id="seg-resolved" class="seg h-seg" data-status="resolved" aria-pressed="{{eq .SelectedStatus "resolved"}}" style="--c: var(--green)">Решённые<span class="seg-count">{{.TotalResolved}}</span></button>
+  <button type="button" id="seg-all" class="seg h-seg" data-status="all" aria-pressed="{{eq .SelectedStatus "all"}}" style="--c: var(--muted)">Все<span class="seg-count">{{.TotalIncidents}}</span></button>
 </div>
 {{end}}
 

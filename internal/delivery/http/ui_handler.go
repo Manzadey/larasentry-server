@@ -422,7 +422,12 @@ func (h *UIHandler) HandleUpdateProjectGitHubSettings(w http.ResponseWriter, r *
 	}
 
 	w.Header().Set("HX-Trigger", "github-settings-updated")
-	http.Redirect(w, r, "/ui", http.StatusSeeOther)
+	// Белый список, а не произвольный адрес из формы: иначе форма стала бы открытым редиректом
+	returnTo := "/ui"
+	if r.FormValue("return_to") == "/ui/github" {
+		returnTo = "/ui/github"
+	}
+	http.Redirect(w, r, returnTo, http.StatusSeeOther)
 }
 
 // baseName returns the last segment of a PHP class name or a file path.
