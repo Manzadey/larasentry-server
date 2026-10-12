@@ -490,8 +490,8 @@ func buildIncidentWhere(filter domain.IncidentFilter) (string, []interface{}) {
 	}
 
 	if filter.Query != "" {
-		where += " AND (i.message LIKE ? OR i.exception_class LIKE ? OR i.file LIKE ? OR i.request_url LIKE ? OR p.name LIKE ? OR i.last_release LIKE ? OR i.route_name LIKE ?)"
-		pattern := "%" + filter.Query + "%"
+		where += " AND (unicode_lower(i.message) LIKE ? OR unicode_lower(i.exception_class) LIKE ? OR unicode_lower(i.file) LIKE ? OR unicode_lower(i.request_url) LIKE ? OR unicode_lower(p.name) LIKE ? OR unicode_lower(i.last_release) LIKE ? OR unicode_lower(i.route_name) LIKE ?)"
+		pattern := "%" + strings.ToLower(filter.Query) + "%"
 		args = append(args, pattern, pattern, pattern, pattern, pattern, pattern, pattern)
 	}
 

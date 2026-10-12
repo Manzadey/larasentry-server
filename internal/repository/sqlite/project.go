@@ -55,7 +55,7 @@ func (r *ProjectRepo) GetByKey(ctx context.Context, apiKey string) (*domain.Proj
 }
 
 func (r *ProjectRepo) GetByName(ctx context.Context, name string) (*domain.Project, error) {
-	return r.getOne(ctx, "LOWER(p.name) = LOWER(?) LIMIT 1", strings.TrimSpace(name))
+	return r.getOne(ctx, "unicode_lower(p.name) = unicode_lower(?) LIMIT 1", strings.TrimSpace(name))
 }
 
 func (r *ProjectRepo) GetByID(ctx context.Context, id int64) (*domain.Project, error) {

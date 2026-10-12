@@ -514,3 +514,26 @@ func TestRestoreIncidentState_UndoResolveKeepsRegression(t *testing.T) {
 		t.Fatalf("state not restored: before %+v, after %+v", before, after)
 	}
 }
+
+func TestGetIncidents_SearchIgnoresCyrillicCase(t *testing.T) {
+	incRepo, _, cleanup := setupTestDB(t)
+	defer cleanup()
+	ctx := context.Background()
+
+	evt := domain.IncomingEvent{ProjectID: 1, ProjectName: "Default Project", Payload: domain.EventPayload{
+		ExceptionClass: "RuntimeException", Message: "Ошибка оплаты заказа", File: "app/A.php", Line: 1,
+	}}
+	if _, err := incRepo.UpsertIncident(ctx, evt, "cyrillic-hash"); err != nil {
+		t.Fatalf("UpsertIncident failed: %v", err)
+	}
+
+	for _, q := range []string{"ошибка", "ОПЛАТЫ", "runtimeexception"} {
+		found, err := incRepo.GetIncidents(ctx, domain.IncidentFilter{Query: q, Status: "all"})
+		if err != nil {
+			t.Fatalf("GetIncidents(%q) failed: %v", q, err)
+		}
+		if len(found) != 1 {
+			t.Errorf("query %q: expected 1 incident, got %d", q, len(found))
+		}
+	}
+}

@@ -2,13 +2,30 @@ package sqlite
 
 import (
 	"database/sql"
+	"database/sql/driver"
 	"fmt"
 	"log"
 	"os"
 	"path/filepath"
+	"strings"
 
-	_ "modernc.org/sqlite"
+	"modernc.org/sqlite"
 )
+
+// unicode_lower заменяет встроенные LOWER() и LIKE: в SQLite без ICU они меняют регистр только у ASCII,
+// и «Ошибка» не находилась по запросу «ошибка». Функция регистрируется до первого соединения.
+func init() {
+	sqlite.MustRegisterDeterministicScalarFunction("unicode_lower", 1, func(_ *sqlite.FunctionContext, args []driver.Value) (driver.Value, error) {
+		switch v := args[0].(type) {
+		case string:
+			return strings.ToLower(v), nil
+		case []byte:
+			return strings.ToLower(string(v)), nil
+		default:
+			return v, nil
+		}
+	})
+}
 
 // InitDB initializes SQLite database and creates tables
 func InitDB(dbPath string) (*sql.DB, error) {
