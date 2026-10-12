@@ -21,15 +21,11 @@ import (
 )
 
 // @title LaraSentry API
-// @version 1.0
-// @description API documentation for LaraSentry Go Server.
+// @version 2.0
+// @description REST API LaraSentry: приём ошибок от Laravel, жизненный цикл инцидентов, релизы из CI/CD, аналитика и поток событий.
+// @description Ключ не нужен: проект определяется по имени, а доступ ограничен ALLOWED_IPS (пусто — только хост сервиса).
 // @host localhost:8080
 // @BasePath /
-
-// @securityDefinitions.apikey Bearer
-// @in header
-// @name Authorization
-// @description Type "Bearer" followed by a space and API key.
 
 func main() {
 	_ = godotenv.Load()
@@ -117,33 +113,36 @@ func main() {
 	})
 
 	mux := http.NewServeMux()
+	// UI и Swagger закрываются basic auth на nginx, список IP — только для API
+	api := http.NewServeMux()
+	mux.Handle("/api/", deliveryHttp.NewIPAllowlist(allowedIPs).Middleware(api))
 
 	// 1. Ingestion routes
-	mux.HandleFunc("POST /api/events", apiHandler.HandleEvent)
-	mux.HandleFunc("POST /api/events/batch", apiHandler.HandleBatchEvents)
+	api.HandleFunc("POST /api/events", apiHandler.HandleEvent)
+	api.HandleFunc("POST /api/events/batch", apiHandler.HandleBatchEvents)
 
 	// 2. Incidents routes
-	mux.HandleFunc("GET /api/incidents", apiHandler.HandleListIncidents)
-	mux.HandleFunc("POST /api/incidents/batch", apiHandler.HandleBatchIncidents)
-	mux.HandleFunc("GET /api/incidents/{id}", apiHandler.HandleGetIncident)
-	mux.HandleFunc("DELETE /api/incidents/{id}", apiHandler.HandleDeleteIncident)
-	mux.HandleFunc("POST /api/incidents/{id}/resolve", apiHandler.HandleResolveIncident)
-	mux.HandleFunc("POST /api/incidents/{id}/reopen", apiHandler.HandleReopenIncident)
-	mux.HandleFunc("POST /api/incidents/{id}/ignore", apiHandler.HandleIgnoreIncident)
+	api.HandleFunc("GET /api/incidents", apiHandler.HandleListIncidents)
+	api.HandleFunc("POST /api/incidents/batch", apiHandler.HandleBatchIncidents)
+	api.HandleFunc("GET /api/incidents/{id}", apiHandler.HandleGetIncident)
+	api.HandleFunc("DELETE /api/incidents/{id}", apiHandler.HandleDeleteIncident)
+	api.HandleFunc("POST /api/incidents/{id}/resolve", apiHandler.HandleResolveIncident)
+	api.HandleFunc("POST /api/incidents/{id}/reopen", apiHandler.HandleReopenIncident)
+	api.HandleFunc("POST /api/incidents/{id}/ignore", apiHandler.HandleIgnoreIncident)
 
 	// 3. Projects routes
-	mux.HandleFunc("PUT /api/projects/{id}/github", apiHandler.HandleUpdateProjectGitHub)
-	mux.HandleFunc("POST /api/projects/{id}/github", apiHandler.HandleUpdateProjectGitHub)
+	api.HandleFunc("PUT /api/projects/{id}/github", apiHandler.HandleUpdateProjectGitHub)
+	api.HandleFunc("POST /api/projects/{id}/github", apiHandler.HandleUpdateProjectGitHub)
 
 	// 4. Releases routes
-	mux.HandleFunc("GET /api/releases", apiHandler.HandleListReleases)
-	mux.HandleFunc("POST /api/releases", apiHandler.HandleCreateRelease)
-	mux.HandleFunc("GET /api/releases/{version}/incidents", apiHandler.HandleReleaseIncidents)
+	api.HandleFunc("GET /api/releases", apiHandler.HandleListReleases)
+	api.HandleFunc("POST /api/releases", apiHandler.HandleCreateRelease)
+	api.HandleFunc("GET /api/releases/{version}/incidents", apiHandler.HandleReleaseIncidents)
 
 	// 5. Analytics & System
-	mux.HandleFunc("GET /api/stats/summary", apiHandler.HandleStatsSummary)
-	mux.HandleFunc("GET /api/events/stream", apiHandler.HandleEventsStreamJSON)
-	mux.HandleFunc("GET /api/health", apiHandler.HandleHealthCheck)
+	api.HandleFunc("GET /api/stats/summary", apiHandler.HandleStatsSummary)
+	api.HandleFunc("GET /api/events/stream", apiHandler.HandleEventsStreamJSON)
+	api.HandleFunc("GET /api/health", apiHandler.HandleHealthCheck)
 
 	// Swagger documentation
 	mux.HandleFunc("/swagger/", httpSwagger.WrapHandler)
@@ -171,7 +170,7 @@ func main() {
 	})
 	
 	log.Printf("Larasentry server is running on :%s (UI at http://localhost:%s/ui)...", port, port)
-	if err := http.ListenAndServe(":"+port, deliveryHttp.NewIPAllowlist(allowedIPs).Middleware(mux)); err != nil {
+	if err := http.ListenAndServe(":"+port, mux); err != nil {
 		log.Fatalf("Server failed: %v", err)
 	}
 }

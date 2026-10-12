@@ -96,7 +96,7 @@ func (a *IPAllowlist) Allows(addr netip.Addr) bool {
 func (a *IPAllowlist) Middleware(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if ip := a.clientIP(r); !a.Allows(ip) {
-			log.Printf("Request from %s rejected: not in ALLOWED_IPS (peer %s)", ip, r.RemoteAddr)
+			log.Printf("API request from %s rejected: not in ALLOWED_IPS (peer %s)", ip, r.RemoteAddr)
 			writeError(w, http.StatusForbidden, "Forbidden - IP not allowed")
 			return
 		}
