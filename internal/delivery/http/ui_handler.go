@@ -196,14 +196,17 @@ func (h *UIHandler) HandleIndex(w http.ResponseWriter, r *http.Request) {
 	if err != nil {
 		log.Printf("Error getting projects: %v", err)
 	}
-	projectCounts := make(map[int64]int, len(projects))
-	latestReleases := make(map[int64]string, len(projects))
-	for _, p := range projects {
-		projectCounts[p.ID], _ = h.incidentRepo.CountIncidents(ctx, p.ID, "all")
-		if h.releaseRepo != nil {
-			if rel, _ := h.releaseRepo.GetLatestRelease(ctx, p.ID); rel != nil {
-				latestReleases[p.ID] = rel.Version
-			}
+	projectCounts, err := h.incidentRepo.CountByProject(ctx)
+	if err != nil {
+		log.Printf("Error counting incidents by project: %v", err)
+	}
+	// Пустая карта, а не nil: шаблон выводит её в JSON, и null сломал бы чтение релизов в JS
+	latestReleases := map[int64]string{}
+	if h.releaseRepo != nil {
+		if versions, err := h.releaseRepo.LatestVersions(ctx); err != nil {
+			log.Printf("Error getting latest releases: %v", err)
+		} else {
+			latestReleases = versions
 		}
 	}
 

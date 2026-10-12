@@ -60,6 +60,28 @@ func (r *ReleaseRepo) CreateRelease(ctx context.Context, projectID int64, versio
 	return r.GetRelease(ctx, projectID, version)
 }
 
+func (r *ReleaseRepo) LatestVersions(ctx context.Context) (map[int64]string, error) {
+	rows, err := r.db.QueryContext(ctx, `
+	SELECT project_id, version FROM (
+		SELECT project_id, version, ROW_NUMBER() OVER (PARTITION BY project_id ORDER BY created_at DESC) AS rn
+		FROM releases
+	) WHERE rn = 1`)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	versions := map[int64]string{}
+	for rows.Next() {
+		var projectID int64
+		var version string
+		if err := rows.Scan(&projectID, &version); err != nil {
+			return nil, err
+		}
+		versions[projectID] = version
+	}
+	return versions, rows.Err()
+}
+
 func (r *ReleaseRepo) GetLatestRelease(ctx context.Context, projectID int64) (*domain.Release, error) {
 	query := `
 	SELECT id, project_id, version, COALESCE(ref, ''), COALESCE(commit_sha, ''), created_at

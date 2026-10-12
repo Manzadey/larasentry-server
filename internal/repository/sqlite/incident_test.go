@@ -537,3 +537,32 @@ func TestGetIncidents_SearchIgnoresCyrillicCase(t *testing.T) {
 		}
 	}
 }
+
+func TestLatestVersionsAndCountByProject(t *testing.T) {
+	incRepo, relRepo, cleanup := setupTestDB(t)
+	defer cleanup()
+	ctx := context.Background()
+
+	for _, v := range []string{"1.0.0", "1.1.0"} {
+		if _, err := relRepo.CreateRelease(ctx, 1, v, "", ""); err != nil {
+			t.Fatalf("CreateRelease(%s) failed: %v", v, err)
+		}
+	}
+	for _, hash := range []string{"a", "b"} {
+		evt := domain.IncomingEvent{ProjectID: 1, ProjectName: "Default Project", Payload: domain.EventPayload{
+			ExceptionClass: "RuntimeException", Message: hash, File: "app/A.php", Line: 1,
+		}}
+		if _, err := incRepo.UpsertIncident(ctx, evt, hash); err != nil {
+			t.Fatalf("UpsertIncident failed: %v", err)
+		}
+	}
+
+	versions, err := relRepo.LatestVersions(ctx)
+	if err != nil || versions[1] != "1.1.0" {
+		t.Errorf("LatestVersions: got %v, %v; want project 1 → 1.1.0", versions, err)
+	}
+	counts, err := incRepo.CountByProject(ctx)
+	if err != nil || counts[1] != 2 {
+		t.Errorf("CountByProject: got %v, %v; want project 1 → 2", counts, err)
+	}
+}

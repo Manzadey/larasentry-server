@@ -710,6 +710,24 @@ func (r *IncidentRepo) CountIncidents(ctx context.Context, projectID int64, stat
 	return count, err
 }
 
+func (r *IncidentRepo) CountByProject(ctx context.Context) (map[int64]int, error) {
+	rows, err := r.db.QueryContext(ctx, "SELECT project_id, COUNT(*) FROM incidents GROUP BY project_id")
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	counts := map[int64]int{}
+	for rows.Next() {
+		var projectID int64
+		var count int
+		if err := rows.Scan(&projectID, &count); err != nil {
+			return nil, err
+		}
+		counts[projectID] = count
+	}
+	return counts, rows.Err()
+}
+
 func (r *IncidentRepo) CleanOldIncidents(ctx context.Context, daysToKeep int) (int64, error) {
 	query := `DELETE FROM incidents WHERE last_seen_at < datetime('now', ?)`
 	modifier := fmt.Sprintf("-%d days", daysToKeep)

@@ -55,6 +55,9 @@ func (m *mockReleaseRepo) UpsertRelease(ctx context.Context, projectID int64, ve
 func (m *mockReleaseRepo) CreateRelease(ctx context.Context, projectID int64, version, ref, commit string) (*domain.Release, error) {
 	return &domain.Release{ID: 1, ProjectID: projectID, Version: version, Ref: ref, Commit: commit}, nil
 }
+func (m *mockReleaseRepo) LatestVersions(ctx context.Context) (map[int64]string, error) {
+	return map[int64]string{}, nil
+}
 func (m *mockReleaseRepo) GetLatestRelease(ctx context.Context, projectID int64) (*domain.Release, error) {
 	return &domain.Release{ID: 1, ProjectID: projectID, Version: "v1.2.3"}, nil
 }
@@ -87,6 +90,9 @@ func (m *mockIncidentRepo) GetIncidentsCount(ctx context.Context, filter domain.
 }
 func (m *mockIncidentRepo) GetIncidentByID(ctx context.Context, id int64) (*domain.Incident, error) {
 	return m.incident, nil
+}
+func (m *mockIncidentRepo) CountByProject(ctx context.Context) (map[int64]int, error) {
+	return map[int64]int{1: 1}, nil
 }
 func (m *mockIncidentRepo) CountIncidents(ctx context.Context, projectID int64, status string) (int, error) {
 	return 1, nil

@@ -366,6 +366,8 @@ type ReleaseRepository interface {
 	UpsertRelease(ctx context.Context, projectID int64, version string) (*Release, error)
 	CreateRelease(ctx context.Context, projectID int64, version, ref, commit string) (*Release, error)
 	GetLatestRelease(ctx context.Context, projectID int64) (*Release, error)
+	// LatestVersions возвращает версию последнего релиза каждого проекта: project_id → version.
+	LatestVersions(ctx context.Context) (map[int64]string, error)
 	GetRelease(ctx context.Context, projectID int64, version string) (*Release, error)
 	GetReleasesWithStats(ctx context.Context, projectID int64, limit int) ([]ReleaseSummary, error)
 	GetIncidentsByRelease(ctx context.Context, projectID int64, version string, newOnly bool) ([]Incident, error)
@@ -379,6 +381,8 @@ type IncidentRepository interface {
 	GetIncidentsCount(ctx context.Context, filter IncidentFilter) (int, error)
 	GetIncidentByID(ctx context.Context, id int64) (*Incident, error)
 	CountIncidents(ctx context.Context, projectID int64, status string) (int, error)
+	// CountByProject возвращает число инцидентов каждого проекта во всех статусах.
+	CountByProject(ctx context.Context) (map[int64]int, error)
 	CleanOldIncidents(ctx context.Context, daysToKeep int) (int64, error)
 	ResolveIncident(ctx context.Context, id int64, resolutionType string, targetVersion string) error
 	ReopenIncident(ctx context.Context, id int64) error
