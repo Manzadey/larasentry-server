@@ -494,3 +494,13 @@ func TestHandleIncidentDetail_AppContextEmpty(t *testing.T) {
 		t.Errorf("expected empty-context placeholder in rendered HTML")
 	}
 }
+
+func TestHandleIncidentDetail_AppContextKeepsAmpersandReadable(t *testing.T) {
+	body := renderIncidentDetail(t, newContextIncident(&domain.AppContext{
+		Shared: map[string]any{"url": "https://shop.test/?a=1&b=2"},
+	}))
+
+	if strings.Contains(body, `\u0026`) || !strings.Contains(body, "a=1&amp;b=2") {
+		t.Errorf("expected URL with readable ampersand in rendered HTML")
+	}
+}
