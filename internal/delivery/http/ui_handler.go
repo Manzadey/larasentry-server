@@ -1,6 +1,7 @@
 package http
 
 import (
+	"bytes"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -83,11 +84,15 @@ func NewUIHandler(
 			if v == nil {
 				return ""
 			}
-			b, err := json.MarshalIndent(v, "", "  ")
-			if err != nil {
+			var buf bytes.Buffer
+			enc := json.NewEncoder(&buf)
+			// html/template экранирует вывод сам; иначе & в URL показывается как &
+			enc.SetEscapeHTML(false)
+			enc.SetIndent("", "  ")
+			if err := enc.Encode(v); err != nil {
 				return fmt.Sprintf("%v", v)
 			}
-			return string(b)
+			return strings.TrimSuffix(buf.String(), "\n")
 		},
 		"formatTimestamp": func(ts float64) string {
 			if ts <= 0 {

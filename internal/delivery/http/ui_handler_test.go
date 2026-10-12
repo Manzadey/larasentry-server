@@ -2,6 +2,7 @@ package http
 
 import (
 	"context"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -460,3 +461,67 @@ func TestHandleIncidentDetail_ExtendedContextTabs(t *testing.T) {
 }
 
 
+
+func renderIncidentDetail(t *testing.T, inc *domain.Incident) string {
+	t.Helper()
+	handler, err := NewUIHandler(&mockProjectRepo{}, &mockIncidentRepo{incident: inc}, &mockReleaseRepo{}, sse.NewBroker())
+	if err != nil {
+		t.Fatalf("failed to create UIHandler: %v", err)
+	}
+	req := httptest.NewRequest(http.MethodGet, fmt.Sprintf("/ui/incidents/%d", inc.ID), nil)
+	rec := httptest.NewRecorder()
+	handler.HandleIncidentDetail(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected status 200, got %d", rec.Code)
+	}
+	return rec.Body.String()
+}
+
+func newContextIncident(appCtx *domain.AppContext) *domain.Incident {
+	return &domain.Incident{
+		ID:             78,
+		ProjectID:      1,
+		ProjectName:    "Shop Project",
+		Hash:           "hash78",
+		ExceptionClass: "InvalidOrderException",
+		Message:        "Order is invalid",
+		File:           "app/Services/OrderService.php",
+		Line:           10,
+		Status:         domain.StatusUnresolved,
+		EventsCount:    1,
+		FirstSeenAt:    time.Now(),
+		LastSeenAt:     time.Now(),
+		AppContext:     appCtx,
+	}
+}
+
+func TestHandleIncidentDetail_AppContextTab(t *testing.T) {
+	body := renderIncidentDetail(t, newContextIncident(&domain.AppContext{
+		Shared:    map[string]any{"trace_id": "t-1"},
+		Exception: map[string]any{"_truncated": true, "_size": float64(20000)},
+	}))
+
+	for _, want := range []string{"tab-btn-context", "tab-content-context", "trace_id", "t-1", "Контекст больше лимита (20000 байт)"} {
+		if !strings.Contains(body, want) {
+			t.Errorf("expected %q in rendered HTML", want)
+		}
+	}
+}
+
+func TestHandleIncidentDetail_AppContextEmpty(t *testing.T) {
+	body := renderIncidentDetail(t, newContextIncident(nil))
+
+	if !strings.Contains(body, "Приложение не передало контекст") {
+		t.Errorf("expected empty-context placeholder in rendered HTML")
+	}
+}
+
+func TestHandleIncidentDetail_AppContextKeepsAmpersandReadable(t *testing.T) {
+	body := renderIncidentDetail(t, newContextIncident(&domain.AppContext{
+		Shared: map[string]any{"url": "https://shop.test/?a=1&b=2"},
+	}))
+
+	if strings.Contains(body, `\u0026`) || !strings.Contains(body, "a=1&amp;b=2") {
+		t.Errorf("expected URL with readable ampersand in rendered HTML")
+	}
+}

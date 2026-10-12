@@ -48,6 +48,7 @@ type EventPayload struct {
 	Execution      *ExecutionContext   `json:"execution,omitempty"`
 	Breadcrumbs    []Breadcrumb        `json:"breadcrumbs,omitempty"`
 	System         *SystemContext      `json:"system,omitempty"`
+	Context        *AppContext         `json:"context,omitempty"`
 }
 
 // RouteContext represents route information
@@ -94,6 +95,11 @@ type Breadcrumb struct {
 	Message   string         `json:"message"`
 	Data      map[string]any `json:"data,omitempty"`
 	Timestamp float64        `json:"timestamp"`
+}
+
+type AppContext struct {
+	Shared    map[string]any `json:"shared,omitempty"`
+	Exception map[string]any `json:"exception,omitempty"`
 }
 
 // SystemContext represents runtime resource and environment metrics
@@ -226,6 +232,7 @@ type Incident struct {
 	QueueJob          *QueueJobContext    `json:"queue_job,omitempty"`
 	System            *SystemContext      `json:"system,omitempty"`
 	Breadcrumbs       []Breadcrumb        `json:"breadcrumbs,omitempty"`
+	AppContext        *AppContext         `json:"app_context,omitempty"`
 }
 
 // IncidentDetail represents extended incident view with parsed stack frames

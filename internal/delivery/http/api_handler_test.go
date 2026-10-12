@@ -489,3 +489,31 @@ func TestHandleUpdateProjectGitHub_RejectsUnselectedRepo(t *testing.T) {
 		t.Fatalf("expected 400, got %d: %s", rec.Code, rec.Body.String())
 	}
 }
+
+func TestHandleEvent_DecodesAppContext(t *testing.T) {
+	handler, eventChan, _ := setupTestAPIHandler(t)
+
+	body := []byte(`{"exception_class":"RuntimeException","message":"m","file":"f.php","line":1,` +
+		`"release":"1.0.0","environment":"production",` +
+		`"context":{"shared":{"trace_id":"t-1"},"exception":{"order_id":42}}}`)
+
+	req := httptest.NewRequest(http.MethodPost, "/api/events", bytes.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	rec := httptest.NewRecorder()
+
+	handler.HandleEvent(rec, req)
+
+	if rec.Code != http.StatusAccepted {
+		t.Fatalf("expected 202 Accepted, got %d: %s", rec.Code, rec.Body.String())
+	}
+
+	select {
+	case event := <-eventChan:
+		c := event.Payload.Context
+		if c == nil || c.Shared["trace_id"] != "t-1" || c.Exception["order_id"] != float64(42) {
+			t.Errorf("unexpected decoded context: %+v", c)
+		}
+	default:
+		t.Fatal("expected event to be dispatched into eventChan")
+	}
+}

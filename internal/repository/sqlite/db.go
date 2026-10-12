@@ -83,6 +83,7 @@ func InitDB(dbPath string) (*sql.DB, error) {
 		request_context TEXT,
 		queue_context TEXT,
 		breadcrumbs TEXT,
+		app_context TEXT,
 		FOREIGN KEY(project_id) REFERENCES projects(id)
 	);
 
@@ -182,6 +183,7 @@ func migrateIncidentsColumns(db *sql.DB) error {
 		{"request_context", "TEXT"},
 		{"queue_context", "TEXT"},
 		{"breadcrumbs", "TEXT"},
+		{"app_context", "TEXT"},
 	}
 
 	for _, col := range columnsToAdd {
