@@ -272,6 +272,7 @@ func TestHandleIncidentDetail_PHPVersion(t *testing.T) {
 		FirstSeenAt:    time.Now(),
 		LastSeenAt:     time.Now(),
 		PHPVersion:     "8.2.18",
+		LaravelVersion: "11.28.0",
 	}
 
 	handler, err := NewUIHandler(&mockProjectRepo{}, &mockIncidentRepo{incident: mockInc}, &mockReleaseRepo{}, sse.NewBroker())
@@ -293,6 +294,12 @@ func TestHandleIncidentDetail_PHPVersion(t *testing.T) {
 	}
 	if !strings.Contains(body, "Версия PHP") {
 		t.Errorf("expected body to contain 'Версия PHP'")
+	}
+	if !strings.Contains(body, "Laravel 11.28.0") {
+		t.Errorf("expected body to contain 'Laravel 11.28.0', got: %s", body)
+	}
+	if !strings.Contains(body, "Фреймворк (Laravel)") {
+		t.Errorf("expected body to contain 'Фреймворк (Laravel)'")
 	}
 }
 
@@ -316,4 +323,119 @@ func TestHandleUpdateProjectGitHubSettings_Form(t *testing.T) {
 		t.Errorf("expected HX-Trigger 'github-settings-updated'")
 	}
 }
+
+func TestHandleIncidentDetail_ExtendedContextTabs(t *testing.T) {
+	maxTries := 5
+	configCached := true
+	mockInc := &domain.Incident{
+		ID:             77,
+		ProjectID:      1,
+		ProjectName:    "Shop Project",
+		Hash:           "hash77",
+		ExceptionClass: "PaymentFailedException",
+		Message:        "Stripe charge failed",
+		File:           "app/Services/StripeService.php",
+		Line:           92,
+		Status:         domain.StatusUnresolved,
+		EventsCount:    3,
+		FirstSeenAt:    time.Now().Add(-10 * time.Minute),
+		LastSeenAt:     time.Now(),
+		RouteName:      "orders.checkout",
+		RouteAction:    "App\\Http\\Controllers\\OrderController@checkout",
+		ExecutionType:  "queue",
+		Route: &domain.RouteContext{
+			Name:       "orders.checkout",
+			Action:     "App\\Http\\Controllers\\OrderController@checkout",
+			Middleware: []string{"web", "auth:sanctum"},
+		},
+		HTTPRequest: &domain.HTTPRequestContext{
+			URL:      "https://shop.example.com/checkout",
+			Method:   "POST",
+			ClientIP: "192.168.1.100",
+			Headers:  map[string]string{"user-agent": "Mozilla/5.0"},
+			Body:     map[string]any{"amount": 500},
+		},
+		QueueJob: &domain.QueueJobContext{
+			JobName:  "App\\Jobs\\ProcessPaymentJob",
+			Queue:    "payments-high",
+			Attempts: 2,
+			MaxTries: &maxTries,
+			Timeout:  120,
+		},
+		System: &domain.SystemContext{
+			PHPVersion:       "8.3.4",
+			LaravelVersion:   "11.28.0",
+			MemoryUsageBytes: 14680064,
+			MemoryPeakBytes:  27262976,
+			DurationMS:       312.45,
+			Hostname:         "worker-pod-7",
+			OS:               "Linux 6.1.0",
+			SAPI:             "cli",
+			ConfigCached:     &configCached,
+		},
+		Breadcrumbs: []domain.Breadcrumb{
+			{
+				Category:  "sql",
+				Level:     "info",
+				Message:   "SELECT * FROM orders WHERE id = 4910",
+				Timestamp: 1728676510.12,
+			},
+			{
+				Category:  "http",
+				Level:     "error",
+				Message:   "POST https://api.stripe.com/v1/charges [500 Server Error]",
+				Timestamp: 1728676515.34,
+			},
+		},
+	}
+
+	handler, err := NewUIHandler(&mockProjectRepo{}, &mockIncidentRepo{incident: mockInc}, &mockReleaseRepo{}, sse.NewBroker())
+	if err != nil {
+		t.Fatalf("failed to create UIHandler: %v", err)
+	}
+
+	req := httptest.NewRequest(http.MethodGet, "/ui/incidents/77", nil)
+	rec := httptest.NewRecorder()
+	handler.HandleIncidentDetail(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected status 200, got %d", rec.Code)
+	}
+
+	body := rec.Body.String()
+
+	// 1. Tab buttons
+	if !strings.Contains(body, "tab-btn-stack") || !strings.Contains(body, "tab-btn-breadcrumbs") ||
+		!strings.Contains(body, "tab-btn-request") || !strings.Contains(body, "tab-btn-system") {
+		t.Errorf("expected tab navigation buttons in rendered HTML")
+	}
+
+	// 2. Breadcrumbs content
+	if !strings.Contains(body, "SELECT * FROM orders WHERE id = 4910") {
+		t.Errorf("expected breadcrumb SQL message in body")
+	}
+	if !strings.Contains(body, "https://api.stripe.com/v1/charges") {
+		t.Errorf("expected breadcrumb HTTP message in body")
+	}
+
+	// 3. Request / Queue content
+	if !strings.Contains(body, "orders.checkout") {
+		t.Errorf("expected route name 'orders.checkout' in body")
+	}
+	if !strings.Contains(body, "App\\Jobs\\ProcessPaymentJob") {
+		t.Errorf("expected job name 'App\\Jobs\\ProcessPaymentJob' in body")
+	}
+	if !strings.Contains(body, "payments-high") {
+		t.Errorf("expected queue name 'payments-high' in body")
+	}
+
+	// 4. System content
+	if !strings.Contains(body, "worker-pod-7") {
+		t.Errorf("expected hostname 'worker-pod-7' in body")
+	}
+	if !strings.Contains(body, "Linux 6.1.0") {
+		t.Errorf("expected OS 'Linux 6.1.0' in body")
+	}
+}
+
 

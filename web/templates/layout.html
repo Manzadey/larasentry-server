@@ -397,6 +397,9 @@
     document.addEventListener('htmx:afterSwap', function(evt) {
       if (evt.detail.target && evt.detail.target.id === 'detail-panel-content') {
         initStackTraceFilter();
+        if (typeof switchDetailTab === 'function') {
+          switchDetailTab('stack');
+        }
       }
     });
 

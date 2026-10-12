@@ -1,6 +1,7 @@
 package http
 
 import (
+	"encoding/json"
 	"fmt"
 	"html/template"
 	"log"
@@ -8,6 +9,7 @@ import (
 	"net/url"
 	"strconv"
 	"strings"
+	"time"
 
 	"server/internal/delivery/sse"
 	"server/internal/domain"
@@ -47,6 +49,49 @@ func NewUIHandler(
 				return rawURL
 			}
 			return u.Host
+		},
+		"formatBytes": func(b int64) string {
+			if b <= 0 {
+				return "0 B"
+			}
+			const unit = 1024
+			if b < unit {
+				return fmt.Sprintf("%d B", b)
+			}
+			div, exp := int64(unit), 0
+			for n := b / unit; n >= unit; n /= unit {
+				div *= unit
+				exp++
+			}
+			return fmt.Sprintf("%.1f %cB", float64(b)/float64(div), "KMGTPE"[exp])
+		},
+		"formatDuration": func(ms float64) string {
+			if ms <= 0 {
+				return "0 ms"
+			}
+			if ms < 1000 {
+				return fmt.Sprintf("%.1f ms", ms)
+			}
+			return fmt.Sprintf("%.2f s", ms/1000)
+		},
+		"jsonPretty": func(v any) string {
+			if v == nil {
+				return ""
+			}
+			b, err := json.MarshalIndent(v, "", "  ")
+			if err != nil {
+				return fmt.Sprintf("%v", v)
+			}
+			return string(b)
+		},
+		"formatTimestamp": func(ts float64) string {
+			if ts <= 0 {
+				return ""
+			}
+			sec := int64(ts)
+			nsec := int64((ts - float64(sec)) * 1e9)
+			t := time.Unix(sec, nsec)
+			return t.Format("15:04:05.000")
 		},
 	}
 	tmpl, err := template.New("").Funcs(funcMap).ParseFS(
