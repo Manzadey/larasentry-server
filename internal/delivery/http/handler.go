@@ -728,7 +728,11 @@ func (h *APIHandler) HandleReleaseIncidents(w http.ResponseWriter, r *http.Reque
 		return
 	}
 
-	project, _ := h.resolveProject(r, "")
+	project, err := h.resolveProject(r, "")
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "Failed to resolve project: "+err.Error())
+		return
+	}
 
 	if h.releaseRepo == nil {
 		writeError(w, http.StatusInternalServerError, "Release repository not configured")
@@ -767,7 +771,11 @@ func (h *APIHandler) HandleStatsSummary(w http.ResponseWriter, r *http.Request) 
 		return
 	}
 
-	project, _ := h.resolveProject(r, "")
+	project, err := h.resolveProject(r, "")
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "Failed to resolve project: "+err.Error())
+		return
+	}
 
 	summary, err := h.incidentRepo.GetStatsSummary(r.Context(), project.ID)
 	if err != nil {

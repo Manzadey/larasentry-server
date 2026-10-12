@@ -2,7 +2,9 @@ package http
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"testing"
@@ -496,5 +498,27 @@ func TestHandleEvent_DecodesAppContext(t *testing.T) {
 		}
 	default:
 		t.Fatal("expected event to be dispatched into eventChan")
+	}
+}
+
+type failingProjectRepo struct{ mockProjectRepo }
+
+func (*failingProjectRepo) GetOrCreateByName(ctx context.Context, name string) (*domain.Project, error) {
+	return nil, errors.New("database is locked")
+}
+
+func TestReportsFailCleanlyWhenProjectUnresolved(t *testing.T) {
+	handler := NewAPIHandler(&failingProjectRepo{}, &mockIncidentRepo{}, nil)
+	handler.SetReleaseRepo(&mockReleaseRepo{})
+	mux := http.NewServeMux()
+	mux.HandleFunc("GET /api/releases/{version}/incidents", handler.HandleReleaseIncidents)
+	mux.HandleFunc("GET /api/stats/summary", handler.HandleStatsSummary)
+
+	for _, path := range []string{"/api/releases/1.0.0/incidents", "/api/stats/summary"} {
+		rec := httptest.NewRecorder()
+		mux.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, path, nil))
+		if rec.Code != http.StatusInternalServerError {
+			t.Errorf("%s: got %d, want 500", path, rec.Code)
+		}
 	}
 }
