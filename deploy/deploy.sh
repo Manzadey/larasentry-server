@@ -48,6 +48,8 @@ if healthy; then
 fi
 
 echo "Health check failed, rolling back to $backup" >&2
+# Без доступа к журналу команда просто ничего не покажет, откат это не прерывает
+journalctl -u "$SERVICE" -n 30 --no-pager >&2 || true
 sudo systemctl stop "$SERVICE"
 # Свежий -wal от новой версии нельзя применять к старой базе — повредит её
 rm -f tracker.db-wal tracker.db-shm
