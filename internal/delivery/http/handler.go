@@ -103,10 +103,6 @@ func (h *APIHandler) resolveProject(r *http.Request, explicitName string) (*doma
 	return h.projectRepo.GetOrCreateByName(ctx, "Default Project")
 }
 
-func (h *APIHandler) authenticate(r *http.Request) (*domain.Project, error) {
-	return h.resolveProject(r, "")
-}
-
 func writeJSON(w http.ResponseWriter, status int, data any) {
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(status)
@@ -137,6 +133,19 @@ func getPathParam(r *http.Request, key string) string {
 // =============================================================================
 
 // HandleEvent handles POST /api/events
+// @Summary Отправить событие ошибки (Event Ingestion)
+// @Description Принимает и валидирует входящий payload исключения из Laravel-приложения (через larasentry-client). Обработка происходит асинхронно: запрос ставится в неблокирующую очередь в памяти (channel), вычисляется уникальный MD5-хеш ошибки и клиенту возвращается статус 202 Accepted. Если ошибка повторяется, инцидент дедуплицируется и счетчик увеличивается.
+// @Tags Events (Прием событий)
+// @Accept json
+// @Produce json
+// @Param payload body domain.EventPayload true "JSON-пейлоад с детальной информацией об исключении из Laravel"
+// @Param X-Project header string false "Имя проекта (также X-Project-Name, X-App-Name). Нет такого — проект создаётся"
+// @Param project query string false "Имя проекта, если не передан заголовок (также project_name, app)"
+// @Param project_id query int false "ID проекта, если имя не передано"
+// @Success 202 {object} object{status=string,event_id=string,hash=string} "Событие успешно принято в очередь обработки. Возвращает сгенерированный UUID события и MD5-хеш инцидента."
+// @Failure 400 "Некорректный запрос (невалидный JSON или отсутствуют обязательные поля exception_class/message)"
+// @Failure 403 "IP-адрес клиента не входит в ALLOWED_IPS и запрос пришёл не с хоста сервиса"
+// @Router /api/events [post]
 func (h *APIHandler) HandleEvent(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
 		writeError(w, http.StatusMethodNotAllowed, "Method not allowed")
@@ -224,6 +233,19 @@ func (h *APIHandler) HandleEvent(w http.ResponseWriter, r *http.Request) {
 }
 
 // HandleBatchEvents handles POST /api/events/batch
+// @Summary Пакетная отправка событий ошибок (Batch Ingestion)
+// @Description Позволяет отправить массив ошибок (до 50 событий) за один HTTP-запрос. Используется для периодического сброса локального буфера очередей в Laravel или снижения сетевых накладных расходов при пиковых нагрузках.
+// @Tags Events (Прием событий)
+// @Accept json
+// @Produce json
+// @Param body body object{project=string,events=[]domain.EventPayload} true "Объект, содержащий массив событий"
+// @Param X-Project header string false "Имя проекта (также X-Project-Name, X-App-Name). Нет такого — проект создаётся"
+// @Param project query string false "Имя проекта, если не передан заголовок (также project_name, app)"
+// @Param project_id query int false "ID проекта, если имя не передано"
+// @Success 202 {object} object{status=string,accepted_count=int} "Пачка событий принята в очередь обработки"
+// @Failure 400 "Невалидный JSON, пустой список или превышен лимит в 50 событий"
+// @Failure 403 "IP-адрес клиента не входит в ALLOWED_IPS и запрос пришёл не с хоста сервиса"
+// @Router /api/events/batch [post]
 func (h *APIHandler) HandleBatchEvents(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
 		writeError(w, http.StatusMethodNotAllowed, "Method not allowed")
@@ -324,6 +346,26 @@ func (h *APIHandler) HandleBatchEvents(w http.ResponseWriter, r *http.Request) {
 // =============================================================================
 
 // HandleListIncidents handles GET /api/incidents
+// @Summary Список инцидентов с фильтрацией и пагинацией
+// @Description Возвращает постраничный список сгруппированных инцидентов проекта. Поддерживает фильтрацию по статусу (unresolved, resolved, ignored, all), окружению, версии релиза, поисковой строке, только регрессиям, а также сортировку и пагинацию с метаданными.
+// @Tags Incidents (Инциденты)
+// @Produce json
+// @Param status query string false "Статус инцидента: unresolved (нерешенные, по умолчанию), resolved (закрытые), ignored (заглушенные), all (все)" Enums(unresolved,resolved,ignored,all) default(unresolved)
+// @Param q query string false "Поисковый запрос для фильтрации по сообщению, имени класса, файлу или URL"
+// @Param environment query string false "Окружение исполнения (напр. production, staging, local)"
+// @Param release query string false "Версия релиза (first_release или last_release)"
+// @Param is_regression query bool false "Флаг регрессии: true — показать только ошибки, вернувшиеся после закрытия"
+// @Param sort query string false "Сортировка: recent (свежие), count (по частоте повторов), first_seen (хронологически)" Enums(recent,count,first_seen) default(recent)
+// @Param page query int false "Номер страницы для пагинации (начиная с 1)" default(1)
+// @Param limit query int false "Количество записей на странице (от 1 до 200)" default(50)
+// @Param include_trace query bool false "Включать ли полный стектрейс в каждый элемент списка (по умолчанию false для экономии трафика)" default(false)
+// @Param X-Project header string false "Имя проекта (также X-Project-Name, X-App-Name). Нет такого — проект создаётся"
+// @Param project query string false "Имя проекта, если не передан заголовок (также project_name, app)"
+// @Param project_id query int false "ID проекта, если имя не передано"
+// @Success 200 {object} domain.IncidentListResponse "Успешный возврат списка инцидентов с объектом пагинации meta"
+// @Failure 500 "Внутренняя ошибка сервера базы данных"
+// @Failure 403 "IP-адрес клиента не входит в ALLOWED_IPS и запрос пришёл не с хоста сервиса"
+// @Router /api/incidents [get]
 func (h *APIHandler) HandleListIncidents(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodGet {
 		writeError(w, http.StatusMethodNotAllowed, "Method not allowed")
@@ -432,6 +474,16 @@ func (h *APIHandler) HandleListIncidents(w http.ResponseWriter, r *http.Request)
 }
 
 // HandleGetIncident handles GET /api/incidents/{id}
+// @Summary Детальная карточка инцидента
+// @Description Возвращает полные данные об инциденте: полный стектрейс ошибки, очищенный стектрейс приложения (без сторонних библиотек vendor/laravel/symfony), статистику фреймов кода и историю первого/последнего появления.
+// @Tags Incidents (Инциденты)
+// @Produce json
+// @Param id path int true "Числовой идентификатор инцидента в базе данных"
+// @Success 200 {object} domain.IncidentDetail "Полная информация об инциденте со стектрейсами"
+// @Failure 404 "Инцидент с указанным ID не найден"
+// @Failure 400 "Некорректный ID инцидента"
+// @Failure 403 "IP-адрес клиента не входит в ALLOWED_IPS и запрос пришёл не с хоста сервиса"
+// @Router /api/incidents/{id} [get]
 func (h *APIHandler) HandleGetIncident(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodGet {
 		writeError(w, http.StatusMethodNotAllowed, "Method not allowed")
@@ -461,6 +513,21 @@ func (h *APIHandler) HandleGetIncident(w http.ResponseWriter, r *http.Request) {
 }
 
 // HandleResolveIncident handles POST /api/incidents/{id}/resolve
+// @Summary Закрыть (резолвить) инцидент
+// @Description Помечает инцидент как решенный со стратегией отслеживания повторений:
+// @Description • immediate — закрыть немедленно (при любом новом появлении инцидент переоткроется);
+// @Description • next — исправлен в следующем релизе (новые события из текущего релиза будут глушиться);
+// @Description • current — исправлен в текущем активном релизе проекта;
+// @Description • version — исправлен в конкретной версии (напр. 1.4.3). События из более старых версий игнорируются, а в версии >= указанной — фиксируется регрессия.
+// @Tags Incidents Lifecycle (Жизненный цикл)
+// @Accept json
+// @Produce json
+// @Param id path int true "Идентификатор инцидента"
+// @Param body body domain.ResolveRequest false "Параметры резолва ошибки"
+// @Success 200 {object} domain.Incident "Инцидент успешно закрыт. Возвращает обновленные данные инцидента."
+// @Failure 404 "Инцидент не найден"
+// @Failure 403 "IP-адрес клиента не входит в ALLOWED_IPS и запрос пришёл не с хоста сервиса"
+// @Router /api/incidents/{id}/resolve [post]
 func (h *APIHandler) HandleResolveIncident(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
 		writeError(w, http.StatusMethodNotAllowed, "Method not allowed")
@@ -502,6 +569,15 @@ func (h *APIHandler) HandleResolveIncident(w http.ResponseWriter, r *http.Reques
 }
 
 // HandleReopenIncident handles POST /api/incidents/{id}/reopen
+// @Summary Переоткрыть инцидент
+// @Description Переводит ранее закрытый или заглушенный инцидент обратно в активный статус 'unresolved', сбрасывая статус резолва и флаг регрессии.
+// @Tags Incidents Lifecycle (Жизненный цикл)
+// @Produce json
+// @Param id path int true "Идентификатор инцидента"
+// @Success 200 {object} domain.Incident "Инцидент успешно переоткрыт"
+// @Failure 404 "Инцидент не найден"
+// @Failure 403 "IP-адрес клиента не входит в ALLOWED_IPS и запрос пришёл не с хоста сервиса"
+// @Router /api/incidents/{id}/reopen [post]
 func (h *APIHandler) HandleReopenIncident(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
 		writeError(w, http.StatusMethodNotAllowed, "Method not allowed")
@@ -531,6 +607,17 @@ func (h *APIHandler) HandleReopenIncident(w http.ResponseWriter, r *http.Request
 }
 
 // HandleIgnoreIncident handles POST /api/incidents/{id}/ignore
+// @Summary Заглушить / Игнорировать инцидент
+// @Description Переводит инцидент в статус 'ignored'. События продолжат агрегироваться и подсчитываться в базе, но уведомления в Telegram отправляться не будут.
+// @Tags Incidents Lifecycle (Жизненный цикл)
+// @Accept json
+// @Produce json
+// @Param id path int true "Идентификатор инцидента"
+// @Param body body object{ignored=bool} false "Флаг игнорирования"
+// @Success 200 {object} domain.Incident "Статус игнорирования обновлен"
+// @Failure 404 "Инцидент не найден"
+// @Failure 403 "IP-адрес клиента не входит в ALLOWED_IPS и запрос пришёл не с хоста сервиса"
+// @Router /api/incidents/{id}/ignore [post]
 func (h *APIHandler) HandleIgnoreIncident(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
 		writeError(w, http.StatusMethodNotAllowed, "Method not allowed")
@@ -569,6 +656,14 @@ func (h *APIHandler) HandleIgnoreIncident(w http.ResponseWriter, r *http.Request
 }
 
 // HandleDeleteIncident handles DELETE /api/incidents/{id}
+// @Summary Удалить инцидент
+// @Description Безвозвратно удаляет запись об инциденте из базы данных. Полезно для очистки ошибочных логов или тестовых сбоев.
+// @Tags Incidents (Инциденты)
+// @Param id path int true "Идентификатор удаляемого инцидента"
+// @Success 204 "Инцидент успешно удален (тело ответа пустое)"
+// @Failure 404 "Инцидент не найден"
+// @Failure 403 "IP-адрес клиента не входит в ALLOWED_IPS и запрос пришёл не с хоста сервиса"
+// @Router /api/incidents/{id} [delete]
 func (h *APIHandler) HandleDeleteIncident(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodDelete {
 		writeError(w, http.StatusMethodNotAllowed, "Method not allowed")
@@ -597,6 +692,16 @@ func (h *APIHandler) HandleDeleteIncident(w http.ResponseWriter, r *http.Request
 }
 
 // HandleBatchIncidents handles POST /api/incidents/batch
+// @Summary Пакетные действия над несколькими инцидентами
+// @Description Выполняет групповое действие в рамках единой транзакции для массива ID: закрыть (resolve), переоткрыть (reopen), заглушить (ignore) или удалить (delete).
+// @Tags Incidents Lifecycle (Жизненный цикл)
+// @Accept json
+// @Produce json
+// @Param body body domain.BatchIncidentsRequest true "Параметры пакетной операции"
+// @Success 200 {object} object{action=string,affected=int} "Операция успешно выполнена"
+// @Failure 400 "Некорректный запрос или пустой массив ID"
+// @Failure 403 "IP-адрес клиента не входит в ALLOWED_IPS и запрос пришёл не с хоста сервиса"
+// @Router /api/incidents/batch [post]
 func (h *APIHandler) HandleBatchIncidents(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
 		writeError(w, http.StatusMethodNotAllowed, "Method not allowed")
@@ -645,15 +750,27 @@ func (h *APIHandler) HandleBatchIncidents(w http.ResponseWriter, r *http.Request
 // =============================================================================
 
 // HandleListReleases handles GET /api/releases
+// @Summary Список релизов проекта
+// @Description Возвращает историю версий и деплоев приложения с агрегированной статистикой по каждой версии: общее число ошибок, количество новых багов и регрессий.
+// @Tags Releases (Релизы и Деплои)
+// @Produce json
+// @Param limit query int false "Максимальное количество возвращаемых релизов" default(20)
+// @Param X-Project header string false "Имя проекта (также X-Project-Name, X-App-Name). Нет такого — проект создаётся"
+// @Param project query string false "Имя проекта, если не передан заголовок (также project_name, app)"
+// @Param project_id query int false "ID проекта, если имя не передано"
+// @Success 200 {array} domain.ReleaseSummary "Список версий с метриками стабильности"
+// @Failure 500 "Не удалось определить проект или прочитать базу"
+// @Failure 403 "IP-адрес клиента не входит в ALLOWED_IPS и запрос пришёл не с хоста сервиса"
+// @Router /api/releases [get]
 func (h *APIHandler) HandleListReleases(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodGet {
 		writeError(w, http.StatusMethodNotAllowed, "Method not allowed")
 		return
 	}
 
-	project, err := h.authenticate(r)
+	project, err := h.resolveProject(r, "")
 	if err != nil {
-		writeError(w, http.StatusUnauthorized, "Unauthorized - "+err.Error())
+		writeError(w, http.StatusInternalServerError, "Failed to resolve project: "+err.Error())
 		return
 	}
 
@@ -683,6 +800,19 @@ func (h *APIHandler) HandleListReleases(w http.ResponseWriter, r *http.Request) 
 }
 
 // HandleCreateRelease handles POST /api/releases
+// @Summary Зарегистрировать новый релиз (CI/CD деплой-хук)
+// @Description Используется в пайплайнах CI/CD (GitHub Actions, GitLab CI, Bitbucket) для оповещения сервера о выкатке новой версии приложения. Фиксирует версию, ветку и коммит.
+// @Tags Releases (Релизы и Деплои)
+// @Accept json
+// @Produce json
+// @Param body body domain.CreateReleaseRequest true "Данные о выкатываемом релизе"
+// @Param X-Project header string false "Имя проекта (также X-Project-Name, X-App-Name). Нет такого — проект создаётся"
+// @Param project query string false "Имя проекта, если не передан заголовок (также project_name, app)"
+// @Param project_id query int false "ID проекта, если имя не передано"
+// @Success 201 {object} domain.Release "Релиз успешно создан и зарегистрирован"
+// @Failure 400 "Не указан обязательный номер версии"
+// @Failure 403 "IP-адрес клиента не входит в ALLOWED_IPS и запрос пришёл не с хоста сервиса"
+// @Router /api/releases [post]
 func (h *APIHandler) HandleCreateRelease(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
 		writeError(w, http.StatusMethodNotAllowed, "Method not allowed")
@@ -722,6 +852,19 @@ func (h *APIHandler) HandleCreateRelease(w http.ResponseWriter, r *http.Request)
 }
 
 // HandleReleaseIncidents handles GET /api/releases/{version}/incidents
+// @Summary Список инцидентов конкретной версии
+// @Description Возвращает ошибки, зафиксированные в указанной версии релиза. Позволяет мгновенно оценить качество и стабильность свежего релиза.
+// @Tags Releases (Релизы и Деплои)
+// @Produce json
+// @Param version path string true "Семантический номер версии (напр. 1.4.3)"
+// @Param new_only query bool false "Показывать только те ошибки, которые впервые появились именно в этой версии" default(false)
+// @Param X-Project header string false "Имя проекта (также X-Project-Name, X-App-Name). Нет такого — проект создаётся"
+// @Param project query string false "Имя проекта, если не передан заголовок (также project_name, app)"
+// @Param project_id query int false "ID проекта, если имя не передано"
+// @Success 200 {array} domain.Incident "Список ошибок релиза"
+// @Failure 500 "Не удалось определить проект или прочитать базу"
+// @Failure 403 "IP-адрес клиента не входит в ALLOWED_IPS и запрос пришёл не с хоста сервиса"
+// @Router /api/releases/{version}/incidents [get]
 func (h *APIHandler) HandleReleaseIncidents(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodGet {
 		writeError(w, http.StatusMethodNotAllowed, "Method not allowed")
@@ -765,6 +908,17 @@ func (h *APIHandler) HandleReleaseIncidents(w http.ResponseWriter, r *http.Reque
 // =============================================================================
 
 // HandleStatsSummary handles GET /api/stats/summary
+// @Summary Сводная аналитика и счетчики проекта
+// @Description Возвращает ключевые показатели для дашбордов и мониторинга: общее количество инцидентов, нерешенные, решенные, заглушенные, число регрессий и объем событий за последние 24 часа.
+// @Tags Analytics (Аналитика и Метрики)
+// @Produce json
+// @Param X-Project header string false "Имя проекта (также X-Project-Name, X-App-Name). Нет такого — проект создаётся"
+// @Param project query string false "Имя проекта, если не передан заголовок (также project_name, app)"
+// @Param project_id query int false "ID проекта, если имя не передано"
+// @Success 200 {object} domain.StatsSummary "Сводные счетчики проекта"
+// @Failure 500 "Не удалось определить проект или прочитать базу"
+// @Failure 403 "IP-адрес клиента не входит в ALLOWED_IPS и запрос пришёл не с хоста сервиса"
+// @Router /api/stats/summary [get]
 func (h *APIHandler) HandleStatsSummary(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodGet {
 		writeError(w, http.StatusMethodNotAllowed, "Method not allowed")
@@ -791,6 +945,13 @@ func (h *APIHandler) HandleStatsSummary(w http.ResponseWriter, r *http.Request) 
 // =============================================================================
 
 // HandleEventsStreamJSON handles GET /api/events/stream
+// @Summary Поток событий в реальном времени (Server-Sent Events)
+// @Description Постоянное соединение Server-Sent Events (SSE), передающее события новых ошибок (incident_new), регрессий (regression) и обновления счетчиков в формате JSON. Подходит для внешних утилит, ботов и кастомных дашбордов.
+// @Tags Realtime (Потоковая передача)
+// @Produce text/event-stream
+// @Success 200 {string} string "Поток Server-Sent Events успешно установлен"
+// @Failure 403 "IP-адрес клиента не входит в ALLOWED_IPS и запрос пришёл не с хоста сервиса"
+// @Router /api/events/stream [get]
 func (h *APIHandler) HandleEventsStreamJSON(w http.ResponseWriter, r *http.Request) {
 	flusher, ok := w.(http.Flusher)
 	if !ok {
@@ -831,6 +992,13 @@ func (h *APIHandler) HandleEventsStreamJSON(w http.ResponseWriter, r *http.Reque
 }
 
 // HandleHealthCheck handles GET /api/health
+// @Summary Проверка работоспособности сервиса (Health Check)
+// @Description Liveness/Readiness проба для Docker и Kubernetes. Возвращает статус сервиса, доступность базы SQLite, текущий размер очереди в памяти и время непрерывной работы (uptime).
+// @Tags System (Система)
+// @Produce json
+// @Success 200 {object} domain.HealthStatus "Сервис полностью исправен и готов принимать запросы"
+// @Failure 403 "IP-адрес клиента не входит в ALLOWED_IPS и запрос пришёл не с хоста сервиса"
+// @Router /api/health [get]
 func (h *APIHandler) HandleHealthCheck(w http.ResponseWriter, r *http.Request) {
 	uptime := time.Since(h.startTime).Truncate(time.Second).String()
 	queueSize := 0
@@ -849,6 +1017,20 @@ func (h *APIHandler) HandleHealthCheck(w http.ResponseWriter, r *http.Request) {
 }
 
 // HandleUpdateProjectGitHub handles PUT /api/projects/{id}/github
+// @Summary Привязать проект к репозиторию GitHub
+// @Description Задаёт репозиторий, ветку и префикс пути для сниппетов кода и ссылок на GitHub.
+// @Description Репозиторий выбирается из подключённых на /ui/github аккаунтов; github_repo_id = 0 отвязывает проект.
+// @Tags Projects (Проекты)
+// @Accept json
+// @Produce json
+// @Param id path int true "ID проекта"
+// @Param body body object{github_repo_id=int,github_branch=string,path_prefix=string} true "github_repo_id обязателен"
+// @Success 200 {object} object{status=string,message=string,project_id=int} "Настройки сохранены"
+// @Failure 400 "Невалидный JSON, нет github_repo_id или репозиторий не выбран в аккаунте"
+// @Failure 500 "Ошибка базы данных"
+// @Failure 403 "IP-адрес клиента не входит в ALLOWED_IPS и запрос пришёл не с хоста сервиса"
+// @Router /api/projects/{id}/github [put]
+// @Router /api/projects/{id}/github [post]
 func (h *APIHandler) HandleUpdateProjectGitHub(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPut && r.Method != http.MethodPost {
 		writeError(w, http.StatusMethodNotAllowed, "Method not allowed")
