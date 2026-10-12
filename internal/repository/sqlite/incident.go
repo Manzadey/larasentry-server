@@ -106,6 +106,13 @@ func (r *IncidentRepo) UpsertIncident(ctx context.Context, event domain.Incoming
 		}
 	}
 
+	var appContextJSON sql.NullString
+	if c := event.Payload.Context; c != nil && (len(c.Shared) > 0 || len(c.Exception) > 0) {
+		if b, err := json.Marshal(c); err == nil {
+			appContextJSON = sql.NullString{String: string(b), Valid: true}
+		}
+	}
+
 	// 1. Auto-register release if provided
 	if incomingRel != "" && r.releaseRepo != nil {
 		_, _ = r.releaseRepo.UpsertRelease(ctx, event.ProjectID, incomingRel)
@@ -148,8 +155,8 @@ func (r *IncidentRepo) UpsertIncident(ctx context.Context, event domain.Incoming
 			environment, first_release, last_release, status, is_regression, code_snippet,
 			php_version, laravel_version,
 			route_name, route_action, execution_type,
-			request_context, queue_context, system_context, breadcrumbs
-		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 1, ?, ?, ?, ?, ?, 'unresolved', 0, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+			request_context, queue_context, system_context, breadcrumbs, app_context
+		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 1, ?, ?, ?, ?, ?, 'unresolved', 0, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 		RETURNING id;
 		`
 		var newID int64
@@ -159,7 +166,7 @@ func (r *IncidentRepo) UpsertIncident(ctx context.Context, event domain.Incoming
 			event.Payload.AppURL, event.Payload.RequestURL, now, now,
 			incomingEnv, incomingRel, incomingRel, snippetJSON, incomingPHPVer, incomingLaravelVer,
 			routeName, routeAction, executionType,
-			requestContextJSON, queueContextJSON, systemContextJSON, breadcrumbsJSON,
+			requestContextJSON, queueContextJSON, systemContextJSON, breadcrumbsJSON, appContextJSON,
 		).Scan(&newID)
 		if err != nil {
 			return nil, err
@@ -243,7 +250,8 @@ func (r *IncidentRepo) UpsertIncident(ctx context.Context, event domain.Incoming
 				request_context = CASE WHEN ? IS NOT NULL THEN ? ELSE request_context END,
 				queue_context = CASE WHEN ? IS NOT NULL THEN ? ELSE queue_context END,
 				system_context = CASE WHEN ? IS NOT NULL THEN ? ELSE system_context END,
-				breadcrumbs = CASE WHEN ? IS NOT NULL THEN ? ELSE breadcrumbs END
+				breadcrumbs = CASE WHEN ? IS NOT NULL THEN ? ELSE breadcrumbs END,
+				app_context = CASE WHEN ? IS NOT NULL THEN ? ELSE app_context END
 			WHERE id = ?;
 			`
 			_, err = r.db.ExecContext(ctx, updateQuery,
@@ -259,6 +267,7 @@ func (r *IncidentRepo) UpsertIncident(ctx context.Context, event domain.Incoming
 				queueContextJSON, queueContextJSON,
 				systemContextJSON, systemContextJSON,
 				breadcrumbsJSON, breadcrumbsJSON,
+				appContextJSON, appContextJSON,
 				existing.id,
 			)
 			if err != nil {
@@ -334,7 +343,8 @@ func (r *IncidentRepo) UpsertIncident(ctx context.Context, event domain.Incoming
 		request_context = CASE WHEN ? IS NOT NULL THEN ? ELSE request_context END,
 		queue_context = CASE WHEN ? IS NOT NULL THEN ? ELSE queue_context END,
 		system_context = CASE WHEN ? IS NOT NULL THEN ? ELSE system_context END,
-		breadcrumbs = CASE WHEN ? IS NOT NULL THEN ? ELSE breadcrumbs END
+		breadcrumbs = CASE WHEN ? IS NOT NULL THEN ? ELSE breadcrumbs END,
+		app_context = CASE WHEN ? IS NOT NULL THEN ? ELSE app_context END
 	WHERE id = ?;
 	`
 	_, err = r.db.ExecContext(ctx, updateQuery,
@@ -350,6 +360,7 @@ func (r *IncidentRepo) UpsertIncident(ctx context.Context, event domain.Incoming
 		queueContextJSON, queueContextJSON,
 		systemContextJSON, systemContextJSON,
 		breadcrumbsJSON, breadcrumbsJSON,
+		appContextJSON, appContextJSON,
 		existing.id,
 	)
 	if err != nil {
@@ -573,7 +584,8 @@ func (r *IncidentRepo) GetIncidentByID(ctx context.Context, id int64) (*domain.I
 			COALESCE(i.request_context, ''),
 			COALESCE(i.queue_context, ''),
 			COALESCE(i.system_context, ''),
-			COALESCE(i.breadcrumbs, '')
+			COALESCE(i.breadcrumbs, ''),
+			COALESCE(i.app_context, '')
 		FROM incidents i
 		LEFT JOIN projects p ON i.project_id = p.id
 		WHERE i.id = ?`, id)
@@ -582,7 +594,7 @@ func (r *IncidentRepo) GetIncidentByID(ctx context.Context, id int64) (*domain.I
 	var resolvedAt sql.NullTime
 	var isRegrInt int
 	var snippetRaw string
-	var reqContextRaw, queueContextRaw, systemContextRaw, breadcrumbsRaw string
+	var reqContextRaw, queueContextRaw, systemContextRaw, breadcrumbsRaw, appContextRaw string
 	err := row.Scan(
 		&inc.ID, &inc.ProjectID, &inc.ProjectName, &inc.Hash, &inc.ExceptionClass, &inc.Message,
 		&inc.File, &inc.Line, &inc.StackTrace, &inc.AppURL, &inc.RequestURL,
@@ -599,6 +611,7 @@ func (r *IncidentRepo) GetIncidentByID(ctx context.Context, id int64) (*domain.I
 		&queueContextRaw,
 		&systemContextRaw,
 		&breadcrumbsRaw,
+		&appContextRaw,
 	)
 	if err != nil {
 		return nil, err
@@ -654,6 +667,13 @@ func (r *IncidentRepo) GetIncidentByID(ctx context.Context, id int64) (*domain.I
 			inc.Breadcrumbs = bcs
 		}
 	}
+	if appContextRaw != "" {
+		var appCtx domain.AppContext
+		if err := json.Unmarshal([]byte(appContextRaw), &appCtx); err == nil {
+			inc.AppContext = &appCtx
+		}
+	}
+
 	return &inc, nil
 }
 

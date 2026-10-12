@@ -410,3 +410,65 @@ func TestIncident_ExtendedContextPersistence(t *testing.T) {
 }
 
 
+
+func TestIncident_AppContextPersistence(t *testing.T) {
+	incRepo, _, cleanup := setupTestDB(t)
+	defer cleanup()
+
+	ctx := context.Background()
+	const hash = "hash-app-ctx"
+
+	newEvent := func(release string, appCtx *domain.AppContext) domain.IncomingEvent {
+		return domain.IncomingEvent{
+			ProjectID:   1,
+			ProjectName: "Default Project",
+			ProjectKey:  "test-api-key",
+			Payload: domain.EventPayload{
+				ExceptionClass: "InvalidOrderException",
+				Message:        "Order is invalid",
+				File:           "app/Services/OrderService.php",
+				Line:           10,
+				Release:        release,
+				Context:        appCtx,
+			},
+		}
+	}
+	upsert := func(evt domain.IncomingEvent) *domain.Incident {
+		t.Helper()
+		res, err := incRepo.UpsertIncident(ctx, evt, hash)
+		if err != nil {
+			t.Fatalf("UpsertIncident failed: %v", err)
+		}
+		inc, err := incRepo.GetIncidentByID(ctx, res.IncidentID)
+		if err != nil {
+			t.Fatalf("GetIncidentByID failed: %v", err)
+		}
+		return inc
+	}
+
+	inc := upsert(newEvent("1.0.0", &domain.AppContext{
+		Shared:    map[string]any{"trace_id": "t-1"},
+		Exception: map[string]any{"order_id": float64(42)},
+	}))
+	if inc.AppContext == nil || inc.AppContext.Shared["trace_id"] != "t-1" || inc.AppContext.Exception["order_id"] != float64(42) {
+		t.Fatalf("new incident: unexpected app context %+v", inc.AppContext)
+	}
+
+	inc = upsert(newEvent("1.0.0", &domain.AppContext{Shared: map[string]any{"trace_id": "t-2"}}))
+	if inc.AppContext == nil || inc.AppContext.Shared["trace_id"] != "t-2" || inc.AppContext.Exception != nil {
+		t.Fatalf("repeat event must replace context, got %+v", inc.AppContext)
+	}
+
+	inc = upsert(newEvent("1.0.0", &domain.AppContext{}))
+	if inc.AppContext == nil || inc.AppContext.Shared["trace_id"] != "t-2" {
+		t.Fatalf("event without context must keep previous one, got %+v", inc.AppContext)
+	}
+
+	if err := incRepo.ResolveIncident(ctx, inc.ID, "version", "1.0.0"); err != nil {
+		t.Fatalf("ResolveIncident failed: %v", err)
+	}
+	inc = upsert(newEvent("1.1.0", &domain.AppContext{Shared: map[string]any{"trace_id": "t-3"}}))
+	if !inc.IsRegression || inc.AppContext == nil || inc.AppContext.Shared["trace_id"] != "t-3" {
+		t.Fatalf("regression must update context, got regression=%v ctx=%+v", inc.IsRegression, inc.AppContext)
+	}
+}

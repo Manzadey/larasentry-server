@@ -821,6 +821,14 @@ components:
                 type: object
               timestamp:
                 type: number
+        context:
+          type: object
+          description: Контекст приложения — Laravel Context (shared) и Exception::context() (exception); больше лимита → {"_truncated":true,"_size":N}
+          properties:
+            shared:
+              type: object
+            exception:
+              type: object
         system:
           type: object
           description: Ресурсы и системное окружение
