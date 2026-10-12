@@ -38,7 +38,7 @@ func setupTestAPIHandler(t *testing.T) (*APIHandler, chan domain.IncomingEvent, 
 	incidentRepo := &mockIncidentRepo{incident: mockInc}
 	releaseRepo := &mockReleaseRepo{}
 
-	handler := NewAPIHandler(projectRepo, incidentRepo, eventChan, nil)
+	handler := NewAPIHandler(projectRepo, incidentRepo, eventChan)
 	handler.SetReleaseRepo(releaseRepo)
 	handler.SetSSEBroker(broker)
 
@@ -175,25 +175,6 @@ func TestHandleEvent_WithProjectNameInHeader(t *testing.T) {
 		}
 	default:
 		t.Errorf("expected event in eventChan")
-	}
-}
-
-func TestHandleEvent_ForbiddenIP(t *testing.T) {
-	mockInc := &domain.Incident{ID: 1}
-	eventChan := make(chan domain.IncomingEvent, 10)
-	handler := NewAPIHandler(&mockProjectRepo{}, &mockIncidentRepo{incident: mockInc}, eventChan, []string{"192.168.1.100"})
-
-	payload := domain.EventPayload{ExceptionClass: "Error", Message: "Msg"}
-	body, _ := json.Marshal(payload)
-
-	req := httptest.NewRequest(http.MethodPost, "/api/events", bytes.NewReader(body))
-	req.Header.Set("Authorization", "Bearer test-key")
-	req.RemoteAddr = "10.0.0.1:12345"
-	rec := httptest.NewRecorder()
-
-	handler.HandleEvent(rec, req)
-	if rec.Code != http.StatusForbidden {
-		t.Errorf("expected 403 Forbidden for non-whitelisted IP, got %d", rec.Code)
 	}
 }
 

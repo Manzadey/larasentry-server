@@ -5,7 +5,6 @@ import (
 	"errors"
 	"fmt"
 	"log"
-	"net"
 	"net/http"
 	"strconv"
 	"strings"
@@ -24,7 +23,6 @@ type APIHandler struct {
 	releaseRepo  domain.ReleaseRepository
 	sseBroker    *sse.Broker
 	eventChan    chan domain.IncomingEvent
-	allowedIPs   []string
 	startTime    time.Time
 }
 
@@ -32,13 +30,11 @@ func NewAPIHandler(
 	projectRepo domain.ProjectRepository,
 	incidentRepo domain.IncidentRepository,
 	eventChan chan domain.IncomingEvent,
-	allowedIPs []string,
 ) *APIHandler {
 	return &APIHandler{
 		projectRepo:  projectRepo,
 		incidentRepo: incidentRepo,
 		eventChan:    eventChan,
-		allowedIPs:   allowedIPs,
 		startTime:    time.Now(),
 	}
 }
@@ -49,33 +45,6 @@ func (h *APIHandler) SetReleaseRepo(repo domain.ReleaseRepository) {
 
 func (h *APIHandler) SetSSEBroker(broker *sse.Broker) {
 	h.sseBroker = broker
-}
-
-func getClientIP(r *http.Request) string {
-	ip := r.Header.Get("X-Real-IP")
-	if ip == "" {
-		ip = r.Header.Get("X-Forwarded-For")
-	}
-	if ip == "" {
-		ip, _, _ = net.SplitHostPort(r.RemoteAddr)
-	} else {
-		ips := strings.Split(ip, ",")
-		ip = strings.TrimSpace(ips[0])
-	}
-	return ip
-}
-
-func (h *APIHandler) checkIPAllowed(r *http.Request) bool {
-	if len(h.allowedIPs) == 0 {
-		return true
-	}
-	clientIP := getClientIP(r)
-	for _, ip := range h.allowedIPs {
-		if ip == clientIP {
-			return true
-		}
-	}
-	return false
 }
 
 func (h *APIHandler) resolveProject(r *http.Request, explicitName string) (*domain.Project, error) {
@@ -174,11 +143,6 @@ func (h *APIHandler) HandleEvent(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if !h.checkIPAllowed(r) {
-		writeError(w, http.StatusForbidden, "Forbidden - IP not allowed")
-		return
-	}
-
 	var payload domain.EventPayload
 	if err := json.NewDecoder(r.Body).Decode(&payload); err != nil {
 		writeError(w, http.StatusBadRequest, "Bad Request - Invalid JSON")
@@ -263,11 +227,6 @@ func (h *APIHandler) HandleEvent(w http.ResponseWriter, r *http.Request) {
 func (h *APIHandler) HandleBatchEvents(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
 		writeError(w, http.StatusMethodNotAllowed, "Method not allowed")
-		return
-	}
-
-	if !h.checkIPAllowed(r) {
-		writeError(w, http.StatusForbidden, "Forbidden - IP not allowed")
 		return
 	}
 
