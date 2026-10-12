@@ -421,6 +421,20 @@ func (r *IncidentRepo) ResolveIncident(ctx context.Context, id int64, resolution
 	return err
 }
 
+// RestoreIncidentState writes back a state captured before a UI action.
+// Resolve и Reopen сбрасывают is_regression и поля решения, поэтому отмена идёт отдельным путём.
+func (r *IncidentRepo) RestoreIncidentState(ctx context.Context, id int64, state domain.IncidentState) error {
+	_, err := r.db.ExecContext(ctx, `
+	UPDATE incidents SET
+		status = ?,
+		is_regression = ?,
+		resolved_in_release = NULLIF(?, ''),
+		resolved_at = ?
+	WHERE id = ?;
+	`, state.Status, state.IsRegression, state.ResolvedInRelease, state.ResolvedAt, id)
+	return err
+}
+
 func (r *IncidentRepo) ReopenIncident(ctx context.Context, id int64) error {
 	query := `
 	UPDATE incidents SET

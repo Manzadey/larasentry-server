@@ -69,6 +69,7 @@ func (m *mockReleaseRepo) GetIncidentsByRelease(ctx context.Context, projectID i
 
 type mockIncidentRepo struct {
 	incident *domain.Incident
+	restored *domain.IncidentState
 }
 
 func (m *mockIncidentRepo) UpsertIncident(ctx context.Context, event domain.IncomingEvent, hash string) (*domain.UpsertResult, error) {
@@ -93,6 +94,10 @@ func (m *mockIncidentRepo) CleanOldIncidents(ctx context.Context, daysToKeep int
 	return 0, nil
 }
 func (m *mockIncidentRepo) ResolveIncident(ctx context.Context, id int64, resolutionType string, targetVersion string) error {
+	return nil
+}
+func (m *mockIncidentRepo) RestoreIncidentState(ctx context.Context, id int64, state domain.IncidentState) error {
+	m.restored = &state
 	return nil
 }
 func (m *mockIncidentRepo) ReopenIncident(ctx context.Context, id int64) error {
@@ -184,25 +189,23 @@ func TestHandleIncidentDetail_ManualResolveAndReopen(t *testing.T) {
 		t.Fatalf("failed to create UIHandler: %v", err)
 	}
 
-	// 1. Resolve request with view=row
-	reqResolve := httptest.NewRequest(http.MethodPost, "/ui/incidents/42/resolve?type=immediate&view=row", nil)
+	reqResolve := httptest.NewRequest(http.MethodPost, "/ui/incidents/42/resolve?type=immediate", nil)
 	recResolve := httptest.NewRecorder()
 	handler.HandleIncidentDetail(recResolve, reqResolve)
 
-	if recResolve.Code != http.StatusOK {
-		t.Fatalf("expected status 200 on resolve, got %d", recResolve.Code)
+	if recResolve.Code != http.StatusNoContent {
+		t.Fatalf("expected status 204 on resolve, got %d", recResolve.Code)
 	}
 	if recResolve.Header().Get("HX-Trigger") != "incident-updated" {
 		t.Errorf("expected HX-Trigger header to be 'incident-updated'")
 	}
 
-	// 2. Reopen request
-	reqReopen := httptest.NewRequest(http.MethodPost, "/ui/incidents/42/reopen?view=row", nil)
+	reqReopen := httptest.NewRequest(http.MethodPost, "/ui/incidents/42/reopen", nil)
 	recReopen := httptest.NewRecorder()
 	handler.HandleIncidentDetail(recReopen, reqReopen)
 
-	if recReopen.Code != http.StatusOK {
-		t.Fatalf("expected status 200 on reopen, got %d", recReopen.Code)
+	if recReopen.Code != http.StatusNoContent {
+		t.Fatalf("expected status 204 on reopen, got %d", recReopen.Code)
 	}
 	if recReopen.Header().Get("HX-Trigger") != "incident-updated" {
 		t.Errorf("expected HX-Trigger header on reopen to be 'incident-updated'")
@@ -292,17 +295,10 @@ func TestHandleIncidentDetail_PHPVersion(t *testing.T) {
 	}
 
 	body := rec.Body.String()
-	if !strings.Contains(body, "PHP 8.2.18") {
-		t.Errorf("expected body to contain 'PHP 8.2.18', got: %s", body)
-	}
-	if !strings.Contains(body, "Версия PHP") {
-		t.Errorf("expected body to contain 'Версия PHP'")
-	}
-	if !strings.Contains(body, "Laravel 11.28.0") {
-		t.Errorf("expected body to contain 'Laravel 11.28.0', got: %s", body)
-	}
-	if !strings.Contains(body, "Фреймворк (Laravel)") {
-		t.Errorf("expected body to contain 'Фреймворк (Laravel)'")
+	for _, want := range []string{"8.2.18", "11.28.0"} {
+		if !strings.Contains(body, want) {
+			t.Errorf("expected body to contain version %q", want)
+		}
 	}
 }
 
@@ -528,5 +524,36 @@ func TestPlural(t *testing.T) {
 		if got := plural(n, "ошибка", "ошибки", "ошибок"); got != want {
 			t.Errorf("plural(%d) = %q, want %q", n, got, want)
 		}
+	}
+}
+
+func TestHandleIncidentDetail_Restore(t *testing.T) {
+	repo := &mockIncidentRepo{incident: &domain.Incident{ID: 42}}
+	handler, err := NewUIHandler(&mockProjectRepo{}, repo, &mockReleaseRepo{}, sse.NewBroker())
+	if err != nil {
+		t.Fatalf("failed to create UIHandler: %v", err)
+	}
+
+	form := "status=unresolved&is_regression=true&resolved_in_release=1.4.1&resolved_at=2026-10-12T17:39:30.262768%2B03:00"
+	req := httptest.NewRequest(http.MethodPost, "/ui/incidents/42/restore", strings.NewReader(form))
+	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	rec := httptest.NewRecorder()
+	handler.HandleIncidentDetail(rec, req)
+
+	if rec.Code != http.StatusNoContent || rec.Header().Get("HX-Trigger") != "incident-updated" {
+		t.Fatalf("expected 204 with HX-Trigger, got %d %q", rec.Code, rec.Header().Get("HX-Trigger"))
+	}
+	got := repo.restored
+	if got == nil || got.Status != domain.StatusUnresolved || !got.IsRegression || got.ResolvedInRelease != "1.4.1" ||
+		got.ResolvedAt == nil || got.ResolvedAt.Nanosecond() != 262768000 {
+		t.Fatalf("unexpected restored state: %+v", got)
+	}
+
+	bad := httptest.NewRequest(http.MethodPost, "/ui/incidents/42/restore", strings.NewReader("status=deleted"))
+	bad.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	rec = httptest.NewRecorder()
+	handler.HandleIncidentDetail(rec, bad)
+	if rec.Code != http.StatusBadRequest {
+		t.Fatalf("expected 400 for unknown status, got %d", rec.Code)
 	}
 }

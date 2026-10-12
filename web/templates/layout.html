@@ -1,3 +1,5 @@
+{{define "copy-button"}}<button type="button" class="copy-btn btn btn-icon btn-ghost h-ghost btn-xs" data-copy="{{.}}" aria-label="Копировать" title="Копировать"><svg class="i-copy" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M8 16H6a2 2 0 01-2-2V6a2 2 0 012-2h8a2 2 0 012 2v2m-6 12h8a2 2 0 002-2v-8a2 2 0 00-2-2h-8a2 2 0 00-2 2v8a2 2 0 002 2z"/></svg><svg class="i-check" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M5 13l4 4L19 7"/></svg></button>{{end}}
+
 {{define "head"}}
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
@@ -100,6 +102,83 @@
       border-radius: 8px; border: 1px solid var(--line); background: var(--raised); color: var(--text); font-size: 13px;
       box-shadow: 0 12px 32px rgba(0,0,0,.45); opacity: 0; transform: translateY(12px); pointer-events: none; transition: opacity .2s ease, transform .2s ease; }
     .toast.show { opacity: 1; transform: none; }
+    .ns { font-weight: 400; color: var(--muted); }
+    .tag { padding: 2px 8px; border-radius: 6px; font-size: 12px; font-weight: 500; white-space: nowrap; }
+    .tag-red { color: var(--red); background: var(--red-bg); }
+    .tag-amber { color: var(--amber); background: var(--amber-bg); }
+    .tag-green { color: var(--green); background: var(--green-bg); }
+    .tag-muted { color: var(--muted); background: var(--raised); }
+    .btn-xs { width: 26px; height: 26px; }
+    .copy-btn .i-check { display: none; }
+    .copy-btn.copied { color: var(--green) !important; }
+    .copy-btn.copied .i-check { display: block; }
+    .copy-btn.copied .i-copy { display: none; }
+    .copy-btn.copy-failed { color: var(--red) !important; }
+
+    .dh { position: relative; padding: 16px 24px; border-bottom: 1px solid var(--line); display: flex; flex-direction: column; gap: 14px; }
+    .dh-close { position: absolute; top: 12px; right: 16px; z-index: 2; }
+    .dh-top { display: flex; align-items: center; justify-content: space-between; gap: 8px 12px; flex-wrap: wrap; padding-right: 40px; }
+    .dh-where { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; font-size: 12px; color: var(--muted); }
+    .dh-what { display: flex; flex-direction: column; align-items: flex-start; gap: 6px; }
+    .dh-title { margin: 0; font-family: var(--mono); font-size: 17px; font-weight: 600; line-height: 1.35; word-break: break-word; outline: none; }
+    .dh-msg { margin: 0; max-width: 64ch; font-size: 14px; line-height: 1.55; color: var(--text-2); word-break: break-word; white-space: pre-wrap;
+      display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
+    .dh-msg.expanded { display: block; }
+    .dh-more { padding: 0; border: 0; background: transparent; color: var(--blue); font-size: 13px; cursor: pointer; }
+    .hrow { position: relative; margin: 0; display: grid; grid-template-columns: minmax(0,1.6fr) repeat(4, minmax(0,1fr)); border: 1px solid var(--line); border-radius: 8px; background: var(--surface); }
+    .hrow > div { min-width: 0; padding: 8px 12px; display: flex; flex-direction: column; gap: 2px; }
+    .hrow > .hcell { border-left: 1px solid var(--line); }
+    .hrow dt { font-size: 11px; color: var(--muted); }
+    .hrow dd { margin: 0; min-width: 0; font-size: 13px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+    .hfile { display: block; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; font-size: 13px; color: var(--blue); text-decoration: none; outline-offset: -2px; }
+    .hfull { position: absolute; inset: 0; padding: 0 6px 0 12px; display: flex; align-items: center; gap: 6px; min-width: 0; border-radius: 8px; background: var(--surface);
+      opacity: 0; pointer-events: none; transition: opacity .12s ease; }
+    .hfull-path { flex: 1; min-width: 0; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; direction: rtl; text-align: left; font-size: 13px; color: var(--text); user-select: all; cursor: text; }
+    .hrow:has(.hfile:hover) .hfull, .hrow:has(.hfull:hover) .hfull, .hrow:focus-within .hfull { opacity: 1; pointer-events: auto; }
+    .callout { display: flex; gap: 8px; align-items: center; padding: 6px 10px; border-radius: 6px; font-size: 12px; line-height: 1.45; }
+    .callout svg { flex-shrink: 0; }
+    .callout b { font-weight: 600; }
+    .callout-amber { background: rgba(240,168,58,.1); border: 1px solid rgba(240,168,58,.3); color: #F6CF8E; }
+    .callout-green { background: rgba(63,201,142,.1); border: 1px solid rgba(63,201,142,.3); color: #A6E8C9; }
+    @media (max-width: 600px) {
+      .hrow { grid-template-columns: repeat(2, minmax(0,1fr)); }
+      .hrow > div:first-child { grid-column: 1 / -1; }
+      .hrow > .hcell { border-left: 0; border-top: 1px solid var(--line); }
+      .hrow > .hcell:nth-child(odd) { border-left: 1px solid var(--line); }
+      .dh { padding: 16px; }
+    }
+
+    .modal { width: calc(100% - 32px); max-width: 460px; padding: 0; border-radius: 10px; border: 1px solid var(--line); background: var(--surface); color: var(--text); box-shadow: 0 24px 64px rgba(0,0,0,.5); }
+    .modal::backdrop { background: rgba(6,9,14,.7); }
+    .modal[open] { animation: dialogIn .18s ease-out; }
+    @keyframes dialogIn { from { opacity: 0; transform: translateY(8px) scale(.98); } to { opacity: 1; transform: none; } }
+    .modal-head { padding: 18px 20px 0; display: flex; flex-direction: column; gap: 6px; }
+    .modal-head h2 { margin: 0; font-size: 16px; font-weight: 600; }
+    .modal-class { margin: 0; font-family: var(--mono); font-size: 13px; color: var(--text-2); word-break: break-word; }
+    .modal-msg { margin: 0; font-size: 13px; line-height: 1.5; color: var(--muted); overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
+    .modal-options { margin: 16px 0 0; padding: 0 20px 16px; border: 0; display: flex; flex-direction: column; gap: 8px; }
+    .modal-options legend { float: left; width: 100%; padding: 0; margin: 0 0 8px; font-size: 13px; color: var(--muted); }
+    .opt-card { display: flex; align-items: flex-start; gap: 10px; padding: 10px 12px; border-radius: 8px; border: 1px solid var(--line); cursor: pointer; }
+    .opt-card:has(input:checked) { border-color: var(--blue) !important; background: rgba(114,167,255,.07); }
+    .opt-card input { margin: 3px 0 0; accent-color: #72A7FF; }
+    .opt-text { display: flex; flex-direction: column; gap: 2px; }
+    .opt-hint { font-size: 12px; line-height: 1.45; color: var(--muted); }
+    .modal-warn { margin: 16px 20px; padding: 10px 12px; border-radius: 8px; background: rgba(242,107,116,.08); border: 1px solid rgba(242,107,116,.25); font-size: 13px; line-height: 1.5; color: var(--text-2); }
+    .modal-foot { padding: 12px 20px 16px; border-top: 1px solid var(--line); display: flex; justify-content: flex-end; gap: 8px; flex-wrap: wrap; }
+    .modal-foot .btn { padding: 8px 14px; }
+
+    .toast-stack { position: fixed; right: 20px; bottom: 20px; z-index: 60; width: 420px; max-width: calc(100% - 32px); display: flex; flex-direction: column; gap: 8px; }
+    .undo-toast { box-sizing: border-box; border-radius: 10px; border: 1px solid var(--line); background: var(--raised); box-shadow: 0 16px 40px rgba(0,0,0,.5); overflow: hidden; animation: toastIn .24s cubic-bezier(.2,.8,.2,1); }
+    .undo-toast.leaving { animation: toastOut .24s ease-in forwards; pointer-events: none; }
+    @keyframes toastIn { from { opacity: 0; transform: translateY(12px); max-height: 0; } to { opacity: 1; transform: none; max-height: 160px; } }
+    @keyframes toastOut { from { opacity: 1; transform: none; max-height: 160px; } to { opacity: 0; transform: translateX(24px); max-height: 0; margin-top: -8px; border-width: 0; } }
+    .undo-body { display: flex; align-items: center; gap: 12px; padding: 12px 12px 12px 14px; }
+    .undo-icon { flex-shrink: 0; width: 28px; height: 28px; border-radius: 50%; display: flex; align-items: center; justify-content: center; }
+    .undo-text { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 2px; }
+    .undo-text > span { overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
+    .undo-bar { height: 3px; background: var(--line); }
+    .undo-bar > div { height: 3px; width: 100%; transition: width 10s linear; }
+    @media (max-width: 600px) { .toast-stack { right: 16px; left: 16px; bottom: 16px; width: auto; max-width: none; } }
   </style>
 </head>
 <body class="h-full flex flex-col overflow-hidden">
@@ -140,6 +219,75 @@
     <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="var(--green)" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M5 13l4 4L19 7"/></svg>
     <span id="toast-message"></span>
   </div>
+
+  <dialog id="resolve-dialog" class="modal" aria-labelledby="resolve-title">
+    <form method="dialog">
+      <div class="modal-head">
+        <h2 id="resolve-title">Отметить ошибку решённой?</h2>
+        <p class="modal-class"><span class="ns" data-field="ns"></span><span data-field="name"></span></p>
+        <p class="modal-msg" data-field="message"></p>
+      </div>
+      <fieldset class="modal-options">
+        <legend>Когда исправлено</legend>
+        <label class="opt-card">
+          <input type="radio" name="resolve-mode" value="current" checked>
+          <span class="opt-text">
+            <span style="font-size: 14px">Решена в текущем релизе <span class="mono" style="font-size: 12px; color: var(--muted)" data-field="release"></span></span>
+            <span class="opt-hint">Повтор в более новом релизе станет регрессией</span>
+          </span>
+        </label>
+        <label class="opt-card">
+          <input type="radio" name="resolve-mode" value="next">
+          <span class="opt-text">
+            <span style="font-size: 14px">Решена в следующем релизе</span>
+            <span class="opt-hint">Пока не выйдет новый релиз, повторы не считаются</span>
+          </span>
+        </label>
+      </fieldset>
+      <div class="modal-foot">
+        <button type="button" class="btn h-btn" onclick="this.closest('dialog').close()">Отмена</button>
+        <button type="submit" value="confirm" class="btn btn-primary h-primary">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M5 13l4 4L19 7"/></svg>Отметить решённой
+        </button>
+      </div>
+    </form>
+  </dialog>
+
+  <dialog id="reopen-dialog" class="modal" aria-labelledby="reopen-title">
+    <form method="dialog">
+      <div class="modal-head">
+        <h2 id="reopen-title">Открыть ошибку снова?</h2>
+        <p class="modal-class"><span class="ns" data-field="ns"></span><span data-field="name"></span></p>
+        <p class="modal-msg" data-field="message"></p>
+      </div>
+      <p class="modal-warn" data-field="warn"></p>
+      <div class="modal-foot">
+        <button type="button" class="btn h-btn" onclick="this.closest('dialog').close()">Отмена</button>
+        <button type="submit" value="confirm" class="btn btn-danger h-primary">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"/></svg>Открыть снова
+        </button>
+      </div>
+    </form>
+  </dialog>
+
+  <div id="undo-stack" class="toast-stack" role="region" aria-label="Уведомления"></div>
+  <template id="undo-toast-template">
+    <div class="undo-toast" role="status" aria-live="polite">
+      <div class="undo-body">
+        <span class="undo-icon" data-field="icon"></span>
+        <span class="undo-text">
+          <span style="font-size: 13px; font-weight: 500" data-field="text"></span>
+          <span class="mono" style="font-size: 12px; color: var(--text-2)" data-field="name"></span>
+          <span style="font-size: 12px; color: var(--muted)" data-field="message"></span>
+        </span>
+        <button type="button" class="btn btn-surface h-btn" data-action="undo">Отменить<span style="font-variant-numeric: tabular-nums; color: var(--muted)" data-field="left">10 с</span></button>
+        <button type="button" class="btn btn-icon btn-ghost h-ghost" style="width: 28px; height: 28px" data-action="dismiss" aria-label="Скрыть уведомление">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M6 18L18 6M6 6l12 12"/></svg>
+        </button>
+      </div>
+      <div class="undo-bar"><div data-field="bar"></div></div>
+    </div>
+  </template>
 
   <!-- Модальное окно настроек GitHub -->
   <div id="github-modal" class="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/60 backdrop-blur-xs hidden">
@@ -265,10 +413,13 @@
     htmx.onLoad(formatRelativeTimes);
     setInterval(() => formatRelativeTimes(document), 60000);
 
-    let drawerSource = null;
+    let drawerRowId = null;
+    let drawerJustOpened = false;
 
     function openDrawer(source) {
-      drawerSource = source || null;
+      const row = source && source.closest('.row');
+      drawerRowId = row ? row.id : null;
+      drawerJustOpened = true;
       document.getElementById('detail-panel-content').innerHTML = '';
       markSelectedRow();
       document.getElementById('detail-drawer').classList.add('open');
@@ -278,13 +429,10 @@
     function closeDrawer() {
       document.getElementById('detail-drawer').classList.remove('open');
       document.getElementById('drawer-backdrop').classList.remove('open');
-      const row = drawerSource && drawerSource.closest('.row');
-      drawerSource = null;
+      const row = drawerRowId && document.getElementById(drawerRowId);
+      drawerRowId = null;
       markSelectedRow();
-      if (row) {
-        const fresh = document.getElementById(row.id);
-        if (fresh) fresh.querySelector('.row-main').focus();
-      }
+      if (row) row.querySelector('.row-main').focus();
     }
 
     function isDrawerOpen() {
@@ -292,17 +440,34 @@
     }
 
     function markSelectedRow() {
-      const selectedId = drawerSource && drawerSource.closest('.row') ? drawerSource.closest('.row').id : null;
-      document.querySelectorAll('.row').forEach(r => r.classList.toggle('is-selected', r.id === selectedId));
+      document.querySelectorAll('.row').forEach(r => r.classList.toggle('is-selected', r.id === drawerRowId));
     }
+
+    function restoreFocusAfterRefresh() {
+      const el = focusAfterRefresh && document.querySelector(focusAfterRefresh);
+      if (el) {
+        el.focus();
+        focusAfterRefresh = null;
+      }
+    }
+
+    document.addEventListener('htmx:afterSettle', e => {
+      if (e.detail.target.id !== 'detail-panel-content') return;
+      const msg = document.getElementById('incident-message-text');
+      const more = document.querySelector('.dh-more');
+      if (msg && more) more.hidden = msg.scrollHeight <= msg.clientHeight + 1;
+      if (drawerJustOpened) {
+        drawerJustOpened = false;
+        const title = document.getElementById('drawer-title');
+        if (title) title.focus();
+      }
+      restoreFocusAfterRefresh();
+    });
 
     // afterSettle, а не afterSwap: при settle htmx возвращает строкам с тем же id прежние class
     document.addEventListener('htmx:afterSettle', e => {
       if (e.detail.target.id !== 'incident-list') return;
-      if (drawerSource) {
-        const row = document.getElementById(drawerSource.closest('.row').id);
-        drawerSource = row ? row.querySelector('.row-main') : null;
-      }
+      restoreFocusAfterRefresh();
       markSelectedRow();
       live.fresh.forEach(id => {
         const row = document.getElementById('incident-row-' + id);
@@ -374,6 +539,187 @@
       } else if (e.key === 'Tab') {
         ddClose(dd);
       }
+    });
+
+    const ICON_CHECK = '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M5 13l4 4L19 7"/></svg>';
+    const ICON_REOPEN = '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"/></svg>';
+
+    function incidentFromElement(el) {
+      const host = el.closest('[data-id]');
+      const d = host.dataset;
+      const cls = d.class || '';
+      const cut = Math.max(cls.lastIndexOf('\\'), cls.lastIndexOf('/')) + 1;
+      return {
+        id: d.id, ns: cls.slice(0, cut), name: cls.slice(cut), message: d.message,
+        release: d.latestRelease !== undefined ? d.latestRelease : latestReleaseFor(d.projectId),
+        state: { status: d.status, is_regression: d.regression, resolved_in_release: d.resolvedIn, resolved_at: d.resolvedAt }
+      };
+    }
+
+    function latestReleaseFor(projectId) {
+      try {
+        return JSON.parse(document.getElementById('latest-releases').textContent || '{}')[projectId] || '';
+      } catch (err) {
+        return '';
+      }
+    }
+
+    function fillFields(root, values) {
+      Object.entries(values).forEach(([key, value]) => {
+        root.querySelectorAll(`[data-field="${key}"]`).forEach(el => { el.textContent = value; });
+      });
+    }
+
+    let dialogSource = null;
+    let dialogIncident = null;
+
+    function openResolveDialog(source) {
+      const inc = incidentFromElement(source);
+      const dialog = document.getElementById('resolve-dialog');
+      fillFields(dialog, { ns: inc.ns, name: inc.name, message: inc.message, release: inc.release || 'релиз не указан' });
+      dialog.querySelector('input[value=current]').checked = true;
+      showActionDialog(dialog, source, inc);
+      dialog.querySelector('input:checked').focus();
+    }
+
+    function openReopenDialog(source) {
+      const inc = incidentFromElement(source);
+      const dialog = document.getElementById('reopen-dialog');
+      const resolvedIn = inc.state.resolved_in_release;
+      const release = resolvedIn && !['next', 'immediate', 'current'].includes(resolvedIn) ? ' в релизе ' + resolvedIn : '';
+      fillFields(dialog, { ns: inc.ns, name: inc.name, message: inc.message, warn: `Ошибка вернётся в открытые, отметка о решении${release} будет снята.` });
+      showActionDialog(dialog, source, inc);
+      dialog.querySelector('button[value=confirm]').focus();
+    }
+
+    function showActionDialog(dialog, source, inc) {
+      dialogSource = source;
+      dialogIncident = inc;
+      dialog.returnValue = '';
+      dialog.showModal();
+    }
+
+    document.getElementById('resolve-dialog').addEventListener('close', e => {
+      if (e.target.returnValue !== 'confirm') return restoreDialogFocus();
+      const mode = e.target.querySelector('input[name=resolve-mode]:checked').value;
+      // Без релиза литерал current ломает сравнение версий при регрессии — тогда решаем «сейчас»
+      const type = mode === 'next' ? 'next' : (dialogIncident.release ? 'current' : 'immediate');
+      runIncidentAction(dialogIncident, 'resolve', { type });
+    });
+
+    document.getElementById('reopen-dialog').addEventListener('close', e => {
+      if (e.target.returnValue !== 'confirm') return restoreDialogFocus();
+      runIncidentAction(dialogIncident, 'reopen', {});
+    });
+
+    function restoreDialogFocus() {
+      // После close браузер сам возвращает фокус на прежний элемент — ставим свой следующим тиком
+      setTimeout(() => {
+        if (dialogSource && dialogSource.isConnected) dialogSource.focus();
+      });
+    }
+
+    let focusAfterRefresh = null;
+
+    async function postIncident(id, action, params) {
+      const res = await fetch(`/ui/incidents/${id}/${action}`, { method: 'POST', body: new URLSearchParams(params) });
+      if (!res.ok) throw new Error(`${action}: HTTP ${res.status}`);
+      htmx.trigger(document.body, 'incident-updated');
+    }
+
+    async function runIncidentAction(inc, action, params) {
+      const row = dialogSource && dialogSource.closest('.row');
+      focusAfterRefresh = row ? `#${row.id} .row-act button` : '#incident-detail .dh-top > .btn';
+      try {
+        await postIncident(inc.id, action, params);
+      } catch (err) {
+        console.error('Не удалось обновить ошибку:', err);
+        showToast('Не удалось обновить ошибку');
+        return;
+      }
+      pushUndo(inc, action === 'resolve');
+    }
+
+    const undoItems = [];
+
+    function pushUndo(inc, resolved) {
+      undoItems.filter(item => item.inc.id === inc.id).forEach(dismissUndo);
+      while (undoItems.length >= 4) dismissUndo(undoItems[0]);
+
+      const el = document.getElementById('undo-toast-template').content.firstElementChild.cloneNode(true);
+      const color = resolved ? 'var(--green)' : 'var(--red)';
+      const icon = el.querySelector('[data-field=icon]');
+      icon.innerHTML = resolved ? ICON_CHECK : ICON_REOPEN;
+      icon.style.color = color;
+      icon.style.background = resolved ? 'rgba(63,201,142,.15)' : 'rgba(242,107,116,.15)';
+      fillFields(el, { text: resolved ? 'Ошибка отмечена решённой' : 'Ошибка снова открыта', name: inc.ns + inc.name, message: inc.message });
+      el.querySelector('[data-field=message]').title = inc.message;
+      const bar = el.querySelector('[data-field=bar]');
+      bar.style.background = color;
+
+      const item = { inc, el, left: 10 };
+      item.timer = setInterval(() => {
+        item.left -= 1;
+        el.querySelector('[data-field=left]').textContent = item.left + ' с';
+        if (item.left <= 0) dismissUndo(item);
+      }, 1000);
+      el.querySelector('[data-action=undo]').addEventListener('click', () => applyUndo(item));
+      el.querySelector('[data-action=dismiss]').addEventListener('click', () => dismissUndo(item));
+      undoItems.push(item);
+      document.getElementById('undo-stack').append(el);
+      requestAnimationFrame(() => requestAnimationFrame(() => { bar.style.width = '0%'; }));
+    }
+
+    function dismissUndo(item) {
+      const index = undoItems.indexOf(item);
+      if (index < 0) return;
+      undoItems.splice(index, 1);
+      clearInterval(item.timer);
+      item.el.classList.add('leaving');
+      setTimeout(() => item.el.remove(), 240);
+    }
+
+    async function applyUndo(item) {
+      dismissUndo(item);
+      try {
+        await postIncident(item.inc.id, 'restore', item.inc.state);
+      } catch (err) {
+        console.error('Не удалось отменить действие:', err);
+        showToast('Не удалось отменить действие');
+      }
+    }
+
+    function toggleMessage(button) {
+      const msg = document.getElementById(button.getAttribute('aria-controls'));
+      const expanded = msg.classList.toggle('expanded');
+      button.setAttribute('aria-expanded', String(expanded));
+      button.textContent = expanded ? 'Свернуть' : 'Показать полностью';
+    }
+
+    async function copyFromButton(button) {
+      const target = button.dataset.copyTarget && document.querySelector(button.dataset.copyTarget);
+      const text = target ? target.innerText.trim() : button.dataset.copy;
+      const label = button.dataset.label || button.getAttribute('aria-label');
+      button.dataset.label = label;
+      try {
+        await navigator.clipboard.writeText(text);
+        button.classList.add('copied');
+        button.setAttribute('aria-label', 'Скопировано');
+      } catch (err) {
+        console.error('Ошибка копирования:', err);
+        button.classList.add('copy-failed');
+        button.setAttribute('aria-label', 'Не удалось скопировать');
+      }
+      clearTimeout(button.copyTimer);
+      button.copyTimer = setTimeout(() => {
+        button.classList.remove('copied', 'copy-failed');
+        button.setAttribute('aria-label', label);
+      }, 1500);
+    }
+
+    document.addEventListener('click', e => {
+      const button = e.target.closest('.copy-btn');
+      if (button) copyFromButton(button);
     });
 
     function showToast(message) {
@@ -515,7 +861,13 @@
 
     document.addEventListener('keydown', function(e) {
       if (e.defaultPrevented) return;
+      if ((e.ctrlKey || e.metaKey) && e.code === 'KeyZ' && !isTypingTarget(document.activeElement) && undoItems.length) {
+        e.preventDefault();
+        applyUndo(undoItems[undoItems.length - 1]);
+        return;
+      }
       if (e.key === 'Escape') {
+        if (document.querySelector('dialog[open]')) return;
         const ghModal = document.getElementById('github-modal');
         if (ghModal && !ghModal.classList.contains('hidden')) {
           closeGitHubModal();

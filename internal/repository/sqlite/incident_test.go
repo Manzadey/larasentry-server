@@ -472,3 +472,45 @@ func TestIncident_AppContextPersistence(t *testing.T) {
 		t.Fatalf("regression must update context, got regression=%v ctx=%+v", inc.IsRegression, inc.AppContext)
 	}
 }
+
+func TestRestoreIncidentState_UndoResolveKeepsRegression(t *testing.T) {
+	incRepo, _, cleanup := setupTestDB(t)
+	defer cleanup()
+	ctx := context.Background()
+
+	evt := domain.IncomingEvent{ProjectID: 1, ProjectName: "Default Project", Payload: domain.EventPayload{
+		ExceptionClass: "RuntimeException", Message: "boom", File: "app/A.php", Line: 1, Release: "1.0.0",
+	}}
+	res, err := incRepo.UpsertIncident(ctx, evt, "restore-hash")
+	if err != nil {
+		t.Fatalf("UpsertIncident failed: %v", err)
+	}
+	if err := incRepo.ResolveIncident(ctx, res.IncidentID, "version", "1.0.0"); err != nil {
+		t.Fatalf("ResolveIncident failed: %v", err)
+	}
+	evt.Payload.Release = "1.1.0"
+	if _, err := incRepo.UpsertIncident(ctx, evt, "restore-hash"); err != nil {
+		t.Fatalf("regression upsert failed: %v", err)
+	}
+	before, _ := incRepo.GetIncidentByID(ctx, res.IncidentID)
+	if !before.IsRegression || before.ResolvedAt == nil {
+		t.Fatalf("precondition: expected regression with resolved_at, got %+v", before)
+	}
+
+	if err := incRepo.ResolveIncident(ctx, res.IncidentID, "next", ""); err != nil {
+		t.Fatalf("ResolveIncident failed: %v", err)
+	}
+	err = incRepo.RestoreIncidentState(ctx, res.IncidentID, domain.IncidentState{
+		Status: before.Status, IsRegression: before.IsRegression,
+		ResolvedInRelease: before.ResolvedInRelease, ResolvedAt: before.ResolvedAt,
+	})
+	if err != nil {
+		t.Fatalf("RestoreIncidentState failed: %v", err)
+	}
+
+	after, _ := incRepo.GetIncidentByID(ctx, res.IncidentID)
+	if after.Status != domain.StatusUnresolved || !after.IsRegression || after.ResolvedInRelease != "1.0.0" ||
+		after.ResolvedAt == nil || !after.ResolvedAt.Equal(*before.ResolvedAt) {
+		t.Fatalf("state not restored: before %+v, after %+v", before, after)
+	}
+}

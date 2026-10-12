@@ -269,44 +269,41 @@ func (h *UIHandler) HandleIncidentDetail(w http.ResponseWriter, r *http.Request)
 		return
 	}
 
-	// Handle action subpaths: /ui/incidents/{id}/resolve or /ui/incidents/{id}/reopen
 	if len(pathParts) >= 4 {
-		action := pathParts[3]
-		if action == "resolve" && r.Method == http.MethodPost {
+		if r.Method != http.MethodPost {
+			http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+			return
+		}
+		var actionErr error
+		switch action := pathParts[3]; action {
+		case "resolve":
 			resType := r.FormValue("type")
 			if resType == "" {
 				resType = "immediate"
 			}
-			version := r.FormValue("version")
-			if err := h.incidentRepo.ResolveIncident(ctx, id, resType, version); err != nil {
-				log.Printf("Error resolving incident %d: %v", id, err)
-				http.Error(w, "Failed to resolve incident", http.StatusInternalServerError)
-				return
-			}
-			// incident-updated перезагружает список и счётчики сегментов
-			w.Header().Set("HX-Trigger", "incident-updated")
-		} else if action == "reopen" && r.Method == http.MethodPost {
-			if err := h.incidentRepo.ReopenIncident(ctx, id); err != nil {
-				log.Printf("Error reopening incident %d: %v", id, err)
-				http.Error(w, "Failed to reopen incident", http.StatusInternalServerError)
-				return
-			}
-			w.Header().Set("HX-Trigger", "incident-updated")
-		}
-
-		if r.URL.Query().Get("view") == "row" {
-			updatedInc, err := h.incidentRepo.GetIncidentByID(ctx, id)
+			actionErr = h.incidentRepo.ResolveIncident(ctx, id, resType, r.FormValue("version"))
+		case "reopen":
+			actionErr = h.incidentRepo.ReopenIncident(ctx, id)
+		case "restore":
+			state, err := parseIncidentState(r)
 			if err != nil {
-				http.Error(w, "Incident not found", http.StatusNotFound)
+				http.Error(w, err.Error(), http.StatusBadRequest)
 				return
 			}
-			w.Header().Set("Content-Type", "text/html; charset=utf-8")
-			if err := h.tmpl.ExecuteTemplate(w, "incident_row.html", updatedInc); err != nil {
-				log.Printf("Error rendering incident row: %v", err)
-				http.Error(w, "Internal Server Error", http.StatusInternalServerError)
-			}
+			actionErr = h.incidentRepo.RestoreIncidentState(ctx, id, state)
+		default:
+			http.NotFound(w, r)
 			return
 		}
+		if actionErr != nil {
+			log.Printf("Error applying %s to incident %d: %v", pathParts[3], id, actionErr)
+			http.Error(w, "Failed to update incident", http.StatusInternalServerError)
+			return
+		}
+		// incident-updated перезагружает список, счётчики и открытую шторку
+		w.Header().Set("HX-Trigger", "incident-updated")
+		w.WriteHeader(http.StatusNoContent)
+		return
 	}
 
 	incident, err := h.incidentRepo.GetIncidentByID(ctx, id)
@@ -447,4 +444,26 @@ func plural(n int, one, few, many string) string {
 	default:
 		return many
 	}
+}
+
+// parseIncidentState validates the state the UI captured before an action it now undoes.
+func parseIncidentState(r *http.Request) (domain.IncidentState, error) {
+	state := domain.IncidentState{
+		Status:            domain.IncidentStatus(r.FormValue("status")),
+		IsRegression:      r.FormValue("is_regression") == "true",
+		ResolvedInRelease: strings.TrimSpace(r.FormValue("resolved_in_release")),
+	}
+	switch state.Status {
+	case domain.StatusUnresolved, domain.StatusResolved, domain.StatusIgnored:
+	default:
+		return state, fmt.Errorf("unknown status %q", state.Status)
+	}
+	if raw := r.FormValue("resolved_at"); raw != "" {
+		t, err := time.Parse(time.RFC3339Nano, raw)
+		if err != nil {
+			return state, fmt.Errorf("invalid resolved_at: %w", err)
+		}
+		state.ResolvedAt = &t
+	}
+	return state, nil
 }

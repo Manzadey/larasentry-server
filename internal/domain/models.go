@@ -14,6 +14,14 @@ const (
 	StatusIgnored    IncidentStatus = "ignored"
 )
 
+// IncidentState is the resolution state captured before a UI action so it can be undone exactly.
+type IncidentState struct {
+	Status            IncidentStatus
+	IsRegression      bool
+	ResolvedInRelease string
+	ResolvedAt        *time.Time
+}
+
 // UserContext represents the authenticated user details during the error
 type UserContext struct {
 	ID        string `json:"id,omitempty"`
@@ -374,6 +382,7 @@ type IncidentRepository interface {
 	CleanOldIncidents(ctx context.Context, daysToKeep int) (int64, error)
 	ResolveIncident(ctx context.Context, id int64, resolutionType string, targetVersion string) error
 	ReopenIncident(ctx context.Context, id int64) error
+	RestoreIncidentState(ctx context.Context, id int64, state IncidentState) error
 	IgnoreIncident(ctx context.Context, id int64, ignored bool) error
 	DeleteIncident(ctx context.Context, id int64) error
 	BatchAction(ctx context.Context, action string, ids []int64, params *ResolveRequest) (int64, error)
