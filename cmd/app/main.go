@@ -153,8 +153,13 @@ func main() {
 		http.NotFound(w, r)
 	})
 	
-	log.Printf("Larasentry server is running on :%s (UI at http://localhost:%s/ui)...", port, port)
-	if err := http.ListenAndServe(":"+port, mux); err != nil {
+	// На проде 127.0.0.1:8080: иначе соседи по внутренней сети откроют UI в обход basic auth nginx
+	listenAddr := os.Getenv("LISTEN_ADDR")
+	if listenAddr == "" {
+		listenAddr = ":" + port
+	}
+	log.Printf("Larasentry server is listening on %s (UI at /ui)", listenAddr)
+	if err := http.ListenAndServe(listenAddr, mux); err != nil {
 		log.Fatalf("Server failed: %v", err)
 	}
 }

@@ -11,7 +11,8 @@ on:
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
-  cancel-in-progress: true
+  # Деплой не отменяем: прерванный посреди выкладки, он оставит сервис остановленным
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 jobs:
   test:
@@ -36,42 +37,63 @@ jobs:
       - name: Check build
         run: CGO_ENABLED=0 go build -v -o /dev/null ./cmd/app
 
-  deploy:
-    name: Deploy to Server
+  build:
+    name: Build Linux binary
     needs: test
     if: github.ref == 'refs/heads/main' && github.event_name != 'pull_request'
     runs-on: ubuntu-latest
     steps:
-      - name: Execute remote SSH commands to deploy
-        uses: appleboy/ssh-action@v1.2.2
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
         with:
-          host: ${{ secrets.SERVER_HOST }}
-          username: ${{ secrets.SERVER_USER }}
-          key: ${{ secrets.SERVER_SSH_KEY }}
-          passphrase: ${{ secrets.SERVER_PASSPHRASE }}
-          password: ${{ secrets.SERVER_PASSWORD }}
-          port: ${{ secrets.SERVER_PORT || '22' }}
-          script_stop: true
-          script: |
-            set -e
-            echo "🚀 Starting deployment on remote server..."
-            cd ${{ secrets.SERVER_PATH }}
+          go-version-file: 'go.mod'
+          cache: true
 
-            echo "📥 Fetching latest code..."
-            git checkout main || git checkout -b main
-            git fetch origin main
-            git reset --hard origin/main
+      - name: Build
+        run: CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -trimpath -ldflags="-s -w" -o larasentry-server ./cmd/app
 
-            echo "🐳 Building and starting containers..."
-            if docker compose version >/dev/null 2>&1; then
-              docker compose up -d --build --remove-orphans
-              docker compose ps
-            else
-              docker-compose up -d --build --remove-orphans
-              docker-compose ps
-            fi
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: larasentry-server
+          path: |
+            larasentry-server
+            deploy/deploy.sh
+          if-no-files-found: error
+          retention-days: 14
 
-            echo "🧹 Cleaning up dangling Docker images..."
-            docker image prune -f
+  deploy:
+    name: Deploy to Server
+    needs: build
+    runs-on: ubuntu-latest
+    environment: production
+    steps:
+      - name: Download artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: larasentry-server
+          path: dist
 
-            echo "✅ Deployment completed successfully!"
+      - name: Configure SSH
+        env:
+          SSH_KEY: ${{ secrets.SERVER_SSH_KEY }}
+          KNOWN_HOSTS: ${{ secrets.SERVER_KNOWN_HOSTS }}
+        run: |
+          install -m 700 -d ~/.ssh
+          printf '%s\n' "$SSH_KEY" > ~/.ssh/deploy_key
+          chmod 600 ~/.ssh/deploy_key
+          printf '%s\n' "$KNOWN_HOSTS" > ~/.ssh/known_hosts
+
+      - name: Upload and deploy
+        env:
+          HOST: ${{ secrets.SERVER_HOST }}
+          PORT: ${{ secrets.SERVER_PORT }}
+          USER_NAME: ${{ secrets.SERVER_USER }}
+        run: |
+          ssh_opts=(-i ~/.ssh/deploy_key -o BatchMode=yes)
+          scp "${ssh_opts[@]}" -P "$PORT" dist/larasentry-server "$USER_NAME@$HOST:larasentry-server.new"
+          scp "${ssh_opts[@]}" -P "$PORT" dist/deploy/deploy.sh "$USER_NAME@$HOST:deploy.sh"
+          ssh "${ssh_opts[@]}" -p "$PORT" "$USER_NAME@$HOST" 'bash ~/deploy.sh ~/larasentry-server.new'
