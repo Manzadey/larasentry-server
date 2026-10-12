@@ -431,11 +431,10 @@ func TestHandleHealthCheck(t *testing.T) {
 func TestHandleUpdateProjectGitHub(t *testing.T) {
 	handler, _, _ := setupTestAPIHandler(t)
 
-	body := map[string]string{
-		"github_repo":   "Manzadey/larasentry-server",
-		"github_token":  "ghp_testtoken123",
-		"github_branch": "main",
-		"path_prefix":   "/var/www/html",
+	body := map[string]any{
+		"github_repo_id": 7,
+		"github_branch":  "main",
+		"path_prefix":    "/var/www/html",
 	}
 	bodyBytes, _ := json.Marshal(body)
 
@@ -457,5 +456,20 @@ func TestHandleUpdateProjectGitHub(t *testing.T) {
 	}
 	if res["status"] != "ok" {
 		t.Errorf("expected status 'ok', got %v", res["status"])
+	}
+}
+
+func TestHandleUpdateProjectGitHub_RejectsUnselectedRepo(t *testing.T) {
+	handler, _, _ := setupTestAPIHandler(t)
+
+	req := httptest.NewRequest(http.MethodPut, "/api/projects/1/github", bytes.NewReader([]byte(`{"github_repo_id":999}`)))
+	req.Header.Set("Content-Type", "application/json")
+	req.SetPathValue("id", "1")
+	rec := httptest.NewRecorder()
+
+	handler.HandleUpdateProjectGitHub(rec, req)
+
+	if rec.Code != http.StatusBadRequest {
+		t.Fatalf("expected 400, got %d: %s", rec.Code, rec.Body.String())
 	}
 }

@@ -147,8 +147,9 @@ type Project struct {
 	ID           int64  `json:"id"`
 	Name         string `json:"name"`
 	APIKey       string `json:"api_key"`
+	GitHubRepoID int64  `json:"github_repo_id,omitempty"`
 	GitHubRepo   string `json:"github_repo,omitempty"`
-	GitHubToken  string `json:"github_token,omitempty"`
+	GitHubToken  string `json:"-"`
 	GitHubBranch string `json:"github_branch,omitempty"`
 	PathPrefix   string `json:"path_prefix,omitempty"`
 }
@@ -328,7 +329,7 @@ type ProjectRepository interface {
 	GetOrCreateByName(ctx context.Context, name string) (*Project, error)
 	GetByID(ctx context.Context, id int64) (*Project, error)
 	GetAllProjects(ctx context.Context) ([]Project, error)
-	UpdateGitHubSettings(ctx context.Context, id int64, repo, token, branch, pathPrefix string) error
+	UpdateGitHubSettings(ctx context.Context, id, repoID int64, branch, pathPrefix string) error
 }
 
 type GitHubAccountRepository interface {

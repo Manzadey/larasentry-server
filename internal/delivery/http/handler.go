@@ -2,6 +2,7 @@ package http
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"log"
 	"net"
@@ -895,8 +896,7 @@ func (h *APIHandler) HandleUpdateProjectGitHub(w http.ResponseWriter, r *http.Re
 	}
 
 	var req struct {
-		GitHubRepo   string `json:"github_repo"`
-		GitHubToken  string `json:"github_token"`
+		GitHubRepoID int64  `json:"github_repo_id"`
 		GitHubBranch string `json:"github_branch"`
 		PathPrefix   string `json:"path_prefix"`
 	}
@@ -905,7 +905,12 @@ func (h *APIHandler) HandleUpdateProjectGitHub(w http.ResponseWriter, r *http.Re
 		return
 	}
 
-	if err := h.projectRepo.UpdateGitHubSettings(r.Context(), id, req.GitHubRepo, req.GitHubToken, req.GitHubBranch, req.PathPrefix); err != nil {
+	err = h.projectRepo.UpdateGitHubSettings(r.Context(), id, req.GitHubRepoID, req.GitHubBranch, req.PathPrefix)
+	if errors.Is(err, domain.ErrGitHubRepoNotSelected) {
+		writeError(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	if err != nil {
 		writeError(w, http.StatusInternalServerError, "Failed to update GitHub settings: "+err.Error())
 		return
 	}

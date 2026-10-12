@@ -2,6 +2,7 @@ package http
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"html/template"
 	"log"
@@ -14,6 +15,7 @@ import (
 	"server/internal/delivery/sse"
 	"server/internal/domain"
 	"server/internal/pkg/github"
+	"server/internal/usecase"
 	"server/web"
 )
 
@@ -24,6 +26,9 @@ type UIHandler struct {
 	sseBroker    *sse.Broker
 	githubClient *github.Client
 	tmpl         *template.Template
+
+	githubAccounts domain.GitHubAccountRepository
+	githubService  *usecase.GitHubAccounts
 }
 
 func NewUIHandler(
@@ -156,8 +161,18 @@ func (h *UIHandler) HandleIndex(w http.ResponseWriter, r *http.Request) {
 	totalUnresolved, _ := h.incidentRepo.CountIncidents(ctx, 0, "unresolved")
 	totalResolved, _ := h.incidentRepo.CountIncidents(ctx, 0, "resolved")
 
+	var repoGroups []repoGroup
+	if h.githubAccounts != nil {
+		repos, err := h.githubAccounts.ListSelectedRepos(ctx)
+		if err != nil {
+			log.Printf("Error getting GitHub repos: %v", err)
+		}
+		repoGroups = groupReposByAccount(repos)
+	}
+
 	data := map[string]interface{}{
 		"Projects":          projects,
+		"GitHubRepoGroups":  repoGroups,
 		"Incidents":         incidents,
 		"TotalIncidents":    totalIncidents,
 		"TotalUnresolved":   totalUnresolved,
@@ -376,20 +391,20 @@ func (h *UIHandler) HandleUpdateProjectGitHubSettings(w http.ResponseWriter, r *
 		return
 	}
 
-	repo := strings.TrimSpace(r.FormValue("github_repo"))
-	token := strings.TrimSpace(r.FormValue("github_token"))
+	repoID, err := strconv.ParseInt(r.FormValue("github_repo_id"), 10, 64)
+	if err != nil {
+		http.Error(w, "Invalid repository ID", http.StatusBadRequest)
+		return
+	}
 	branch := strings.TrimSpace(r.FormValue("github_branch"))
 	prefix := strings.TrimSpace(r.FormValue("path_prefix"))
 
-	// If token wasn't updated (empty in form submission), keep the existing token
-	if token == "" {
-		existing, err := h.projectRepo.GetByID(r.Context(), projectID)
-		if err == nil && existing != nil {
-			token = existing.GitHubToken
-		}
+	err = h.projectRepo.UpdateGitHubSettings(r.Context(), projectID, repoID, branch, prefix)
+	if errors.Is(err, domain.ErrGitHubRepoNotSelected) {
+		http.Error(w, err.Error(), http.StatusBadRequest)
+		return
 	}
-
-	if err := h.projectRepo.UpdateGitHubSettings(r.Context(), projectID, repo, token, branch, prefix); err != nil {
+	if err != nil {
 		log.Printf("Error updating github settings for project %d: %v", projectID, err)
 		http.Error(w, "Failed to update settings", http.StatusInternalServerError)
 		return

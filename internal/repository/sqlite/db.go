@@ -34,8 +34,6 @@ func InitDB(dbPath string) (*sql.DB, error) {
 		id INTEGER PRIMARY KEY AUTOINCREMENT,
 		name TEXT NOT NULL,
 		api_key TEXT NOT NULL UNIQUE,
-		github_repo TEXT,
-		github_token TEXT,
 		github_branch TEXT DEFAULT 'main',
 		path_prefix TEXT,
 		github_repo_id INTEGER
@@ -220,8 +218,6 @@ func migrateProjectsColumns(db *sql.DB) error {
 		name string
 		def  string
 	}{
-		{"github_repo", "TEXT"},
-		{"github_token", "TEXT"},
 		{"github_branch", "TEXT DEFAULT 'main'"},
 		{"path_prefix", "TEXT"},
 		{"github_repo_id", "INTEGER"},
@@ -234,6 +230,16 @@ func migrateProjectsColumns(db *sql.DB) error {
 				return fmt.Errorf("failed adding column %s: %w", col.name, err)
 			}
 			log.Printf("[DB] Added column %s to projects", col.name)
+		}
+	}
+
+	// Старые привязки сбрасываются намеренно: токены теперь живут в github_accounts
+	for _, col := range []string{"github_repo", "github_token"} {
+		if existing[col] {
+			if _, err := db.Exec("ALTER TABLE projects DROP COLUMN " + col); err != nil {
+				return fmt.Errorf("failed dropping column %s: %w", col, err)
+			}
+			log.Printf("[DB] Dropped column %s from projects", col)
 		}
 	}
 

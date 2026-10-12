@@ -173,21 +173,26 @@
           <label class="block font-medium text-slate-300 mb-1">Проект</label>
           <select name="project_id" id="github-project-select" onchange="onProjectSelectChange(this)" class="w-full bg-slate-950 border border-slate-800 rounded-xl px-3 py-2 text-slate-100 focus:outline-none focus:ring-2 focus:ring-indigo-500/50">
             {{range .Projects}}
-            <option value="{{.ID}}" data-repo="{{.GitHubRepo}}" data-branch="{{.GitHubBranch}}" data-prefix="{{.PathPrefix}}">{{.Name}}</option>
+            <option value="{{.ID}}" data-repo-id="{{.GitHubRepoID}}" data-branch="{{.GitHubBranch}}" data-prefix="{{.PathPrefix}}">{{.Name}}</option>
             {{end}}
           </select>
         </div>
 
         <div>
-          <label class="block font-medium text-slate-300 mb-1">Репозиторий GitHub (owner/repo)</label>
-          <input type="text" name="github_repo" id="github-repo-input" placeholder="например: owner/laravel-app" class="w-full bg-slate-950 border border-slate-800 rounded-xl px-3 py-2 text-slate-100 font-mono focus:outline-none focus:ring-2 focus:ring-indigo-500/50">
-          <p class="text-[11px] text-slate-500 mt-1">Путь к репозиторию на GitHub, например <code class="text-indigo-400">laravel/framework</code></p>
-        </div>
-
-        <div>
-          <label class="block font-medium text-slate-300 mb-1">GitHub Personal Access Token (PAT)</label>
-          <input type="password" name="github_token" id="github-token-input" placeholder="ghp_... (оставьте пустым чтобы сохранить текущий)" class="w-full bg-slate-950 border border-slate-800 rounded-xl px-3 py-2 text-slate-100 font-mono focus:outline-none focus:ring-2 focus:ring-indigo-500/50">
-          <p class="text-[11px] text-slate-500 mt-1">Токен для приватных репозиториев с правами <span class="text-slate-300">Contents: Read</span>. Хранится на сервере и не раскрывается в браузере.</p>
+          <label class="block font-medium text-slate-300 mb-1">Репозиторий GitHub</label>
+          <select name="github_repo_id" id="github-repo-select" onchange="onRepoSelectChange(this)" class="w-full bg-slate-950 border border-slate-800 rounded-xl px-3 py-2 text-slate-100 font-mono focus:outline-none focus:ring-2 focus:ring-indigo-500/50">
+            <option value="0" data-branch="">— не привязан —</option>
+            {{range .GitHubRepoGroups}}
+            <optgroup label="{{.Label}}">
+              {{range .Repos}}
+              <option value="{{.ID}}" data-branch="{{.DefaultBranch}}">{{.FullName}}{{if .Private}} (private){{end}}</option>
+              {{end}}
+            </optgroup>
+            {{end}}
+          </select>
+          {{if not .GitHubRepoGroups}}
+          <p class="text-[11px] text-slate-500 mt-1">Нет выбранных репозиториев. <a href="/ui/github" class="text-indigo-400 hover:underline">Подключите аккаунт GitHub</a>.</p>
+          {{end}}
         </div>
 
         <div class="grid grid-cols-2 gap-3">
@@ -383,14 +388,23 @@
       if (!select) return;
       const opt = select.options[select.selectedIndex];
       if (!opt) return;
-      const repoInput = document.getElementById('github-repo-input');
+      const repoSelect = document.getElementById('github-repo-select');
       const branchInput = document.getElementById('github-branch-input');
       const prefixInput = document.getElementById('github-prefix-input');
-      const tokenInput = document.getElementById('github-token-input');
-      if (repoInput) repoInput.value = opt.getAttribute('data-repo') || '';
+      if (repoSelect) {
+        repoSelect.value = opt.getAttribute('data-repo-id') || '0';
+        // Привязанный репозиторий мог пропасть из выбранных — тогда в селекте нет такой опции
+        if (repoSelect.value === '') repoSelect.value = '0';
+      }
       if (branchInput) branchInput.value = opt.getAttribute('data-branch') || 'main';
       if (prefixInput) prefixInput.value = opt.getAttribute('data-prefix') || '';
-      if (tokenInput) tokenInput.value = '';
+    }
+
+    function onRepoSelectChange(select) {
+      const opt = select.options[select.selectedIndex];
+      const branch = opt ? opt.getAttribute('data-branch') : '';
+      const branchInput = document.getElementById('github-branch-input');
+      if (branch && branchInput) branchInput.value = branch;
     }
 
     // Слушатель HTMX после подгрузки содержимого шторки

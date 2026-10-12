@@ -90,6 +90,8 @@ func main() {
 	// Setup GitHub API client
 	githubClient := github.NewClient(nil, "", 15*time.Minute)
 	uiHandler.SetGitHubClient(githubClient)
+	githubAccountRepo := sqlite.NewGitHubAccountRepo(db)
+	uiHandler.SetGitHubAccounts(githubAccountRepo, usecase.NewGitHubAccounts(githubAccountRepo, githubClient))
 
 	processor.SetOnIncident(func(inc domain.Incident) {
 		sseBroker.BroadcastIncident(inc, uiHandler.GetRowTemplate())

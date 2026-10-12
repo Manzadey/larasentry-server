@@ -38,7 +38,10 @@ func (m *mockProjectRepo) GetAllProjects(ctx context.Context) ([]domain.Project,
 func (m *mockProjectRepo) GetByID(ctx context.Context, id int64) (*domain.Project, error) {
 	return &domain.Project{ID: id, Name: "Test Project", APIKey: "test-key"}, nil
 }
-func (m *mockProjectRepo) UpdateGitHubSettings(ctx context.Context, id int64, repo, token, branch, pathPrefix string) error {
+func (m *mockProjectRepo) UpdateGitHubSettings(ctx context.Context, id, repoID int64, branch, pathPrefix string) error {
+	if repoID == 999 {
+		return domain.ErrGitHubRepoNotSelected
+	}
 	return nil
 }
 
@@ -309,7 +312,7 @@ func TestHandleUpdateProjectGitHubSettings_Form(t *testing.T) {
 		t.Fatalf("failed to create UIHandler: %v", err)
 	}
 
-	form := strings.NewReader("project_id=1&github_repo=myorg/myrepo&github_token=ghp_tok123&github_branch=main&path_prefix=/var/www")
+	form := strings.NewReader("project_id=1&github_repo_id=7&github_branch=main&path_prefix=/var/www")
 	req := httptest.NewRequest(http.MethodPost, "/ui/projects/github-settings", form)
 	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
 	rec := httptest.NewRecorder()
@@ -321,6 +324,24 @@ func TestHandleUpdateProjectGitHubSettings_Form(t *testing.T) {
 	}
 	if rec.Header().Get("HX-Trigger") != "github-settings-updated" {
 		t.Errorf("expected HX-Trigger 'github-settings-updated'")
+	}
+}
+
+func TestHandleUpdateProjectGitHubSettings_RejectsUnselectedRepo(t *testing.T) {
+	handler, err := NewUIHandler(&mockProjectRepo{}, &mockIncidentRepo{}, &mockReleaseRepo{}, sse.NewBroker())
+	if err != nil {
+		t.Fatalf("failed to create UIHandler: %v", err)
+	}
+
+	form := strings.NewReader("project_id=1&github_repo_id=999&github_branch=main&path_prefix=")
+	req := httptest.NewRequest(http.MethodPost, "/ui/projects/github-settings", form)
+	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	rec := httptest.NewRecorder()
+
+	handler.HandleUpdateProjectGitHubSettings(rec, req)
+
+	if rec.Code != http.StatusBadRequest {
+		t.Fatalf("expected 400, got %d", rec.Code)
 	}
 }
 

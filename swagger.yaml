@@ -511,7 +511,7 @@ paths:
   /api/projects/{id}/github:
     put:
       summary: Настройка интеграции с GitHub
-      description: Привязка репозитория GitHub, токена доступа (PAT), ветки и префикса путей к проекту.
+      description: Привязка проекта к репозиторию из подключённых аккаунтов GitHub (см. страницу /ui/github), ветки и префикса путей. github_repo_id = 0 отвязывает репозиторий.
       tags:
         - Projects (Проекты)
       security:
@@ -531,12 +531,10 @@ paths:
             schema:
               type: object
               properties:
-                github_repo:
-                  type: string
-                  example: Manzadey/larasentry-server
-                github_token:
-                  type: string
-                  example: ghp_xxxxxxxxxxxxxxxxxxxx
+                github_repo_id:
+                  type: integer
+                  example: 7
+                  description: ID репозитория из github_repos; репозиторий должен быть выбран в аккаунте
                 github_branch:
                   type: string
                   example: main
@@ -558,6 +556,8 @@ paths:
                     type: string
                   project_id:
                     type: integer
+        '400':
+          description: Неверный JSON или репозиторий не найден среди выбранных
         '401':
           $ref: '#/components/responses/Unauthorized'
 
