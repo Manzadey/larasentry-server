@@ -1,3 +1,9 @@
+function toggleTheme() {
+  const theme = document.documentElement.dataset.theme === 'light' ? 'dark' : 'light';
+  document.documentElement.dataset.theme = theme;
+  try { localStorage.setItem('theme', theme); } catch (e) {}
+}
+
 function ddOpen(dd) {
   document.querySelectorAll('[data-dd]').forEach(other => other !== dd && ddClose(other));
   const list = dd.querySelector('[role=listbox]');

@@ -55,7 +55,7 @@
 
     {{if eq $state "regression"}}
     <div class="callout callout-amber">
-      <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#F0A83A" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z"/></svg>
+      <svg style="stroke: var(--amber)" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z"/></svg>
       <span>Ошибка вернулась{{if $inc.LastRelease}} в релизе <b class="mono">{{$inc.LastRelease}}</b>{{end}}, хотя была закрыта
         {{- if eq $inc.ResolvedInRelease "next"}} до следующего релиза
         {{- else if or (eq $inc.ResolvedInRelease "") (eq $inc.ResolvedInRelease "immediate") (eq $inc.ResolvedInRelease "current")}} вручную
@@ -63,7 +63,7 @@
     </div>
     {{else if eq $state "resolved"}}
     <div class="callout callout-green">
-      <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#3FC98E" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M5 13l4 4L19 7"/></svg>
+      <svg style="stroke: var(--green)" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M5 13l4 4L19 7"/></svg>
       <span>{{if eq $inc.ResolvedInRelease "next"}}Решена в следующем релизе. Пока он не вышел, повторы не считаются.
         {{- else if or (eq $inc.ResolvedInRelease "") (eq $inc.ResolvedInRelease "immediate") (eq $inc.ResolvedInRelease "current")}}Решена вручную. Любой повтор откроет её снова.
         {{- else}}Решена в релизе <b class="mono">{{$inc.ResolvedInRelease}}</b>. Если ошибка повторится в более новом релизе, она откроется снова как регрессия.{{end}}</span>
@@ -323,7 +323,7 @@
   </div>
   {{if $truncated}}
   <div class="callout callout-amber" style="margin: 12px 14px; align-items: flex-start; font-size: 13px; line-height: 1.5">
-    <svg style="margin-top: 2px" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#F0A83A" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z"/></svg>
+    <svg style="stroke: var(--amber); margin-top: 2px" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z"/></svg>
     <span>Контекст занял {{ctxValue (index .Data "_size")}} байт — больше лимита клиента, поэтому данные не отправлены. Лимит задаёт LARASENTRY_MAX_CONTEXT_BYTES, по умолчанию 16 384 байт.</span>
   </div>
   {{else}}

@@ -54,7 +54,7 @@
         hx-indicator="#search-field"
         onsubmit="event.preventDefault()">
     <div id="search-field" class="search">
-      <svg class="search-icon" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#8D96A8" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z"/></svg>
+      <svg style="stroke: var(--muted)" class="search-icon" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z"/></svg>
       <input type="search" id="search-input" name="q" value="{{.Query}}" class="input h-input" autocomplete="off"
              aria-label="Поиск по ошибкам" placeholder="Класс, сообщение, файл или релиз">
       <span class="search-aside">
@@ -76,7 +76,7 @@
       {{range .Projects}}{{if eq .ID $.SelectedProjectID}}{{$projectLabel = .Name}}{{end}}{{end}}
       <button type="button" class="dd-btn h-btn" aria-haspopup="listbox" aria-expanded="false" aria-label="Проект: {{$projectLabel}}">
         <span class="dd-label">{{$projectLabel}}</span>
-        <svg class="dd-chev" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#8D96A8" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M6 9l6 6 6-6"/></svg>
+        <svg style="stroke: var(--muted)" class="dd-chev" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M6 9l6 6 6-6"/></svg>
       </button>
       <div class="dd-list" role="listbox" aria-label="Проект" hidden>
         {{template "dd-option" (dict "Value" "0" "Label" "Все проекты" "Hint" (printf "%d %s" .TotalIncidents (plural .TotalIncidents "ошибка" "ошибки" "ошибок")) "Selected" (eq .SelectedProjectID 0))}}
@@ -91,7 +91,7 @@
       {{$sortLabel := "Сначала новые"}}{{if eq .SelectedSort "count"}}{{$sortLabel = "Сначала частые"}}{{end}}
       <button type="button" class="dd-btn h-btn" aria-haspopup="listbox" aria-expanded="false" aria-label="Сортировка: {{$sortLabel}}">
         <span class="dd-label">{{$sortLabel}}</span>
-        <svg class="dd-chev" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#8D96A8" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M6 9l6 6 6-6"/></svg>
+        <svg style="stroke: var(--muted)" class="dd-chev" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M6 9l6 6 6-6"/></svg>
       </button>
       <div class="dd-list dd-right" role="listbox" aria-label="Сортировка" hidden>
         {{template "dd-option" (dict "Value" "recent" "Label" "Сначала новые" "Hint" "По времени последнего события" "Selected" (ne .SelectedSort "count"))}}
@@ -164,6 +164,6 @@
 {{define "dd-option"}}
 <button type="button" role="option" class="dd-opt" data-value="{{.Value}}" data-label="{{.Label}}" aria-selected="{{.Selected}}" tabindex="-1">
   <span class="dd-opt-text"><span style="font-size: 13px">{{.Label}}</span>{{with .Hint}}<span class="dd-opt-hint">{{.}}</span>{{end}}</span>
-  <svg class="dd-check" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#72A7FF" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M5 13l4 4L19 7"/></svg>
+  <svg style="stroke: var(--blue)" class="dd-check" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M5 13l4 4L19 7"/></svg>
 </button>
 {{end}}

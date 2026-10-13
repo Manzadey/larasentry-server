@@ -2,7 +2,7 @@
 {{range .Incidents}}{{template "incident_row.html" .}}{{else}}
 <div class="empty">
   <div class="empty-icon">
-    <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="#3FC98E" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M5 13l4 4L19 7"/></svg>
+    <svg style="stroke: var(--green)" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M5 13l4 4L19 7"/></svg>
   </div>
   <div style="font-size: 15px; font-weight: 600">Здесь пусто</div>
   <div style="max-width: 420px; font-size: 13px; line-height: 1.5; color: var(--muted)">Под фильтр ничего не подходит. Новые ошибки появятся в списке сами: страница обновляется в реальном времени.</div>

@@ -4,7 +4,7 @@
   <header class="shrink-0 min-h-[56px] px-5 py-2.5 border-b border-line flex items-center justify-between gap-x-4 gap-y-2 flex-wrap">
     <a href="/ui" class="flex items-center gap-2.5 no-underline text-text">
       <span class="w-7 h-7 rounded-md bg-red flex items-center justify-center">
-        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#0F131A" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M13 10V3L4 14h7v7l9-11h-7z"/></svg>
+        <svg style="stroke: var(--bg)" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M13 10V3L4 14h7v7l9-11h-7z"/></svg>
       </span>
       <span class="text-base font-semibold tracking-tight">LaraSentry</span>
     </a>
@@ -24,6 +24,10 @@
       </button>
       {{if .GitHubPage}}<a href="/ui/github" class="btn nav-current" aria-current="page">Аккаунты GitHub</a>{{else}}<a href="/ui/github" class="btn btn-ghost h-ghost">Аккаунты GitHub</a>{{end}}
       <a href="/swagger/" target="_blank" rel="noopener" class="btn btn-ghost h-ghost">API</a>
+      <button type="button" class="btn btn-icon h-btn" onclick="toggleTheme()" aria-label="Переключить тему" title="Переключить тему">
+        <svg class="i-sun" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="4"/><path d="M12 2v2M12 20v2M4.93 4.93l1.41 1.41M17.66 17.66l1.41 1.41M2 12h2M20 12h2M4.93 19.07l1.41-1.41M17.66 6.34l1.41-1.41"/></svg>
+        <svg class="i-moon" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M21 12.79A9 9 0 1111.21 3 7 7 0 0021 12.79z"/></svg>
+      </button>
     </nav>
   </header>
 {{end}}
@@ -52,7 +56,7 @@
             <option value="{{.ID}}" data-repo-id="{{.GitHubRepoID}}" data-branch="{{.GitHubBranch}}" data-prefix="{{.PathPrefix}}">{{.Name}}</option>
             {{end}}
           </select>
-          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#8D96A8" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M6 9l6 6 6-6"/></svg>
+          <svg style="stroke: var(--muted)" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M6 9l6 6 6-6"/></svg>
         </span>
       </div>
       <div class="field">
@@ -61,7 +65,7 @@
           <input type="hidden" name="github_repo_id" value="0">
           <button type="button" id="github-repo-button" class="dd-btn h-btn dd-wide" aria-haspopup="listbox" aria-expanded="false" aria-labelledby="gh-repo-label github-repo-button"{{if not .GitHubRepoGroups}} disabled{{end}}>
             <span class="dd-label">— не привязан —</span>
-            <svg class="dd-chev" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#8D96A8" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M6 9l6 6 6-6"/></svg>
+            <svg style="stroke: var(--muted)" class="dd-chev" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M6 9l6 6 6-6"/></svg>
           </button>
           <div class="dd-list dd-wide" role="listbox" aria-labelledby="gh-repo-label" hidden>
             {{template "dd-option" (dict "Value" "0" "Label" "— не привязан —" "Selected" true)}}
@@ -70,7 +74,7 @@
             {{range .Repos}}
             <button type="button" role="option" class="dd-opt" data-value="{{.ID}}" data-label="{{.FullName}}" data-branch="{{.DefaultBranch}}" aria-selected="false" tabindex="-1">
               <span class="mono" style="font-size: 13px">{{.FullName}}{{if .Private}}<span style="color: var(--muted)"> (private)</span>{{end}}</span>
-              <svg class="dd-check" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#72A7FF" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M5 13l4 4L19 7"/></svg>
+              <svg style="stroke: var(--blue)" class="dd-check" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M5 13l4 4L19 7"/></svg>
             </button>
             {{end}}
             {{end}}
@@ -106,6 +110,10 @@
 {{define "head"}}
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <!-- Тема ставится до загрузки стилей: иначе при светлой теме страница на миг мигает тёмной -->
+  <script>
+    try { document.documentElement.dataset.theme = localStorage.getItem('theme') || (matchMedia('(prefers-color-scheme: light)').matches ? 'light' : 'dark'); } catch (e) {}
+  </script>
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;600&family=IBM+Plex+Sans:wght@400;500;600&display=swap" rel="stylesheet">
