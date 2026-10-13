@@ -11,13 +11,14 @@ import (
 	httpSwagger "github.com/swaggo/http-swagger"
 
 	_ "server/docs"
-	"server/internal/domain"
 	deliveryHttp "server/internal/delivery/http"
 	"server/internal/delivery/sse"
 	"server/internal/delivery/telegram"
+	"server/internal/domain"
 	"server/internal/pkg/github"
 	"server/internal/repository/sqlite"
 	"server/internal/usecase"
+	"server/web"
 )
 
 // @title LaraSentry API
@@ -41,7 +42,7 @@ func main() {
 	tgToken := os.Getenv("TG_BOT_TOKEN")
 	tgChatID := os.Getenv("TG_CHAT_ID")
 	tgProxy := os.Getenv("TG_PROXY")
-	
+
 	intervalStr := os.Getenv("ALERT_INTERVAL")
 	alertInterval := 5 * time.Minute
 	if intervalStr != "" {
@@ -133,7 +134,7 @@ func main() {
 
 	mux.HandleFunc("/swagger/", httpSwagger.WrapHandler)
 
-
+	mux.Handle("GET /ui/static/", web.StaticHandler())
 	mux.HandleFunc("/ui", uiHandler.HandleIndex)
 	mux.HandleFunc("/ui/incidents", uiHandler.HandleIncidents)
 	mux.HandleFunc("/ui/incidents/", uiHandler.HandleIncidentDetail)
@@ -152,7 +153,7 @@ func main() {
 		}
 		http.NotFound(w, r)
 	})
-	
+
 	// На проде 127.0.0.1:8080: иначе соседи по внутренней сети откроют UI в обход basic auth nginx
 	listenAddr := os.Getenv("LISTEN_ADDR")
 	if listenAddr == "" {
