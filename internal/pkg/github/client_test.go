@@ -24,7 +24,6 @@ func TestClient_FetchFileContent(t *testing.T) {
 	transport := roundTripperFunc(func(r *http.Request) (*http.Response, error) {
 		atomic.AddInt32(&requestCount, 1)
 
-		// Verify Authorization header
 		auth := r.Header.Get("Authorization")
 		if auth != "Bearer secret-token-xyz" {
 			return &http.Response{
@@ -33,7 +32,6 @@ func TestClient_FetchFileContent(t *testing.T) {
 			}, nil
 		}
 
-		// Verify Accept header
 		accept := r.Header.Get("Accept")
 		if accept != "application/vnd.github.v3.raw" {
 			return &http.Response{
@@ -42,7 +40,6 @@ func TestClient_FetchFileContent(t *testing.T) {
 			}, nil
 		}
 
-		// Check path and ref query
 		if r.URL.Path == "/repos/owner/repo/contents/app/Models/User.php" && r.URL.Query().Get("ref") == "v1.0.0" {
 			return &http.Response{
 				StatusCode: http.StatusOK,
@@ -63,7 +60,6 @@ func TestClient_FetchFileContent(t *testing.T) {
 	t.Run("Successful fetch and verify caching", func(t *testing.T) {
 		atomic.StoreInt32(&requestCount, 0)
 
-		// 1st call -> HTTP request made
 		content, err := client.FetchFileContent(ctx, "owner/repo", "secret-token-xyz", "v1.0.0", "app/Models/User.php")
 		if err != nil {
 			t.Fatalf("unexpected error: %v", err)
@@ -75,7 +71,6 @@ func TestClient_FetchFileContent(t *testing.T) {
 			t.Errorf("expected 1 HTTP request, got %d", atomic.LoadInt32(&requestCount))
 		}
 
-		// 2nd call with same parameters -> should hit cache, NO extra HTTP request
 		cachedContent, err := client.FetchFileContent(ctx, "owner/repo", "secret-token-xyz", "v1.0.0", "app/Models/User.php")
 		if err != nil {
 			t.Fatalf("unexpected error on cached call: %v", err)

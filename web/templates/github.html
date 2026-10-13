@@ -1,0 +1,109 @@
+<!DOCTYPE html>
+<html lang="ru" class="h-full">
+<head>
+  {{template "head" .}}
+  <title>LaraSentry — аккаунты GitHub</title>
+  <style>
+    .gh-main { max-width: 760px; margin: 0 auto; padding: 24px 16px 48px; display: flex; flex-direction: column; gap: 16px; }
+    .card { border: 1px solid var(--line); border-radius: 10px; background: var(--surface); padding: 20px; display: flex; flex-direction: column; gap: 14px; }
+    .card h2 { margin: 0; font-size: 15px; font-weight: 600; }
+    .card .input { font-size: 13px; }
+    .card .input[aria-invalid=true] { border-color: var(--red); }
+    .alert { margin: 0; font-size: 13px; color: var(--red); }
+    .repos { border: 1px solid var(--line); border-radius: 8px; overflow: hidden; }
+    .repos > summary { display: flex; align-items: center; gap: 8px; padding: 8px 12px; background: var(--bg); font-size: 13px; color: var(--muted); cursor: pointer; list-style: none; }
+    .repos > summary::-webkit-details-marker { display: none; }
+    .repos > summary:hover { background: var(--raised); }
+    .repos-form { padding: 12px; border-top: 1px solid var(--line); display: flex; flex-direction: column; gap: 12px; }
+    .repo-list { max-height: 320px; overflow-y: auto; border: 1px solid var(--line); border-radius: 8px; background: var(--bg); }
+    .repo { display: flex; align-items: center; gap: 10px; padding: 8px 12px; cursor: pointer; }
+    .repo + .repo { border-top: 1px solid var(--line); }
+    .repo-name { min-width: 0; overflow-wrap: anywhere; font-family: var(--mono); font-size: 13px; color: var(--text-2); }
+    input[type=checkbox] { accent-color: var(--green); width: 16px; height: 16px; margin: 0; flex-shrink: 0; }
+    input[type=checkbox]:disabled + .repo-name { color: var(--muted); }
+  </style>
+</head>
+<body class="min-h-full">
+  {{template "header" .}}
+  <main class="gh-main">
+    <div class="flex items-baseline justify-between gap-3 flex-wrap">
+      <h1 style="margin: 0; font-size: 20px; font-weight: 600; letter-spacing: -.01em">Аккаунты GitHub</h1>
+      <a href="/ui" class="h-link" style="font-size: 13px; text-decoration: none">← К инцидентам</a>
+    </div>
+
+    <form method="POST" action="/ui/github/accounts" class="card" aria-labelledby="connect-title">
+      <h2 id="connect-title">Подключить аккаунт</h2>
+      {{if .Error}}<p class="alert" role="alert">{{.Error}}</p>{{end}}
+      <div class="grid gap-3" style="grid-template-columns: repeat(auto-fit, minmax(240px, 1fr))">
+        <label class="field">
+          <span class="field-label">Имя</span>
+          <input type="text" name="name" value="{{.FormName}}" required placeholder="Рабочий" class="input h-input">
+        </label>
+        <label class="field">
+          <span class="field-label">Personal Access Token</span>
+          <input type="password" name="token" required autocomplete="off" placeholder="ghp_... или github_pat_..." class="input h-input mono" aria-invalid="{{if .Error}}true{{else}}false{{end}}">
+        </label>
+      </div>
+      <p style="margin: 0; font-size: 12px; line-height: 1.5; color: var(--muted)">Нужны права на чтение метаданных и содержимого репозиториев (<span style="color: var(--text-2)">Contents: Read</span>).</p>
+      <button type="submit" class="btn btn-primary h-primary self-start">Подключить</button>
+    </form>
+
+    {{range .Accounts}}
+    <section class="card" aria-labelledby="account-{{.ID}}">
+      <div class="flex items-start justify-between gap-3 flex-wrap">
+        <div style="flex: 1 1 300px; min-width: 0">
+          <h2 id="account-{{.ID}}">{{.Name}}{{if .Login}} <span class="mono" style="font-size: 13px; font-weight: 400; color: var(--muted)">@{{.Login}}</span>{{end}}</h2>
+          <p style="margin: 4px 0 0; font-size: 13px; color: var(--muted)">
+            Выбрано {{.ReposSelected}} из {{.ReposTotal}}{{if .ImportAll}} · импортируются все{{end}}{{if .SyncedAt}} · обновлено {{.SyncedAt.Format "02.01.2006 15:04"}}{{else}} · ещё не синхронизирован{{end}}
+          </p>
+          {{if .SyncError}}<p class="alert" role="alert" style="margin-top: 4px">{{.SyncError}}</p>{{end}}
+        </div>
+        <div class="flex gap-2 shrink-0">
+          <form method="POST" action="/ui/github/accounts/{{.ID}}/sync">
+            <button type="submit" class="btn h-btn">Обновить</button>
+          </form>
+          <form method="POST" action="/ui/github/accounts/{{.ID}}/delete" onsubmit="return confirm('Удалить аккаунт? Проекты, привязанные к его репозиториям, будут отвязаны.')">
+            <button type="submit" class="btn btn-ghost h-ghost" style="color: var(--red); font-weight: 500">Удалить</button>
+          </form>
+        </div>
+      </div>
+
+      <details class="repos">
+        <summary>
+          <svg class="chev" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M9 5l7 7-7 7"/></svg>
+          <span style="flex: 1; color: var(--text-2)">Репозитории</span>
+          <span style="font-size: 12px">{{len .Repos}}</span>
+        </summary>
+        <form method="POST" action="/ui/github/accounts/{{.ID}}/repos" class="repos-form">
+          <label class="flex items-center gap-2.5 cursor-pointer" style="font-size: 13px">
+            <input type="checkbox" name="import_all" value="1" {{if .ImportAll}}checked{{end}}
+                   onchange="this.form.querySelectorAll('input[name=selected]').forEach(function (c) { c.disabled = this.checked; }, this)">
+            Импортировать все, включая новые
+          </label>
+          {{$importAll := .ImportAll}}
+          {{with .Repos}}
+          <div class="repo-list" role="group" aria-label="Репозитории">
+            {{range .}}
+            <label class="repo">
+              <input type="checkbox" name="selected" value="{{.ID}}" {{if .Selected}}checked{{end}} {{if $importAll}}disabled{{end}}>
+              <span class="repo-name">{{.FullName}}</span>
+              {{if .Private}}<span class="tag tag-amber" style="padding: 0 6px">private</span>{{end}}
+            </label>
+            {{end}}
+          </div>
+          {{else}}
+          <p class="note-dashed">Список пуст. Нажмите «Обновить».</p>
+          {{end}}
+          <button type="submit" class="btn btn-primary h-primary self-start">Сохранить</button>
+        </form>
+      </details>
+    </section>
+    {{else}}
+    <p class="note-dashed">Аккаунтов пока нет.</p>
+    {{end}}
+  </main>
+
+  {{template "github-modal" .}}
+  {{template "common-scripts" .}}
+</body>
+</html>

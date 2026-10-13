@@ -1,393 +1,345 @@
-<div class="h-full flex flex-col bg-slate-900 border-l border-slate-800 text-slate-200">
-  <!-- Шапка шторки -->
-  <div class="p-5 border-b border-slate-800 flex items-start justify-between bg-slate-900/90 sticky top-0 z-10 backdrop-blur-sm gap-4">
-    <div class="space-y-1.5 pr-4 flex-1 min-w-0">
-      <div class="flex items-center flex-wrap gap-2">
-        <span class="px-2 py-0.5 rounded text-xs font-semibold bg-rose-500/15 text-rose-400 border border-rose-500/30">
-          ×{{.Incident.EventsCount}} повторений
-        </span>
-        <!-- Проект -->
-        <span class="px-2 py-0.5 rounded text-xs font-semibold bg-indigo-500/15 text-indigo-300 border border-indigo-500/30 flex items-center gap-1">
-          <svg class="w-3 h-3 text-indigo-400" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M3 7v10a2 2 0 002 2h14a2 2 0 002-2V9a2 2 0 00-2-2h-6l-2-2H5a2 2 0 00-2 2z"></path></svg>
-          {{if .Incident.ProjectName}}{{.Incident.ProjectName}}{{else}}Default Project{{end}}
-        </span>
-        <!-- Релиз -->
-        {{if .Incident.LastRelease}}
-        <span class="px-2 py-0.5 rounded text-xs font-mono bg-purple-500/15 text-purple-300 border border-purple-500/30 flex items-center gap-1">
-          <svg class="w-3 h-3 text-purple-400" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M7 7h.01M7 3h5c.512 0 1.024.195 1.414.586l7 7a2 2 0 010 2.828l-7 7a2 2 0 01-2.828 0l-7-7A1.994 1.994 0 013 12V7a4 4 0 014-4z"></path></svg>
-          {{.Incident.LastRelease}}
-        </span>
-        {{end}}
-        <!-- Версия PHP -->
-        {{if .Incident.PHPVersion}}
-        <span class="px-2 py-0.5 rounded text-xs font-mono bg-blue-500/15 text-blue-300 border border-blue-500/30 flex items-center gap-1" title="Версия PHP: {{.Incident.PHPVersion}}">
-          <svg class="w-3 h-3 text-blue-400" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10 20l4-16m4 4l4 4-4 4M6 16l-4-4 4-4"></path></svg>
-          PHP {{.Incident.PHPVersion}}
-        </span>
-        {{end}}
-        <!-- Сервер / Хост -->
-        {{if .Incident.AppURL}}
-        <span class="px-2 py-0.5 rounded text-xs font-mono bg-sky-500/10 text-sky-300 border border-sky-500/25 flex items-center gap-1">
-          <svg class="w-3 h-3 text-sky-400" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 12h14M5 12a2 2 0 01-2-2V6a2 2 0 012-2h14a2 2 0 012 2v4a2 2 0 01-2 2M5 12a2 2 0 00-2 2v4a2 2 0 002 2h14a2 2 0 002-2v-4a2 2 0 00-2-2m-2-4h.01M17 16h.01"></path></svg>
-          {{host .Incident.AppURL}}
-        </span>
-        {{end}}
-        <span class="text-xs text-slate-500 font-mono">ID: #{{.Incident.ID}}</span>
-      </div>
-      <h2 class="text-lg font-bold text-white font-mono break-all">
-        {{.Incident.ExceptionClass}}
-      </h2>
-    </div>
-    
-    <!-- Действия и закрытие -->
-    <div class="flex items-center space-x-2 shrink-0">
-      {{if eq .Incident.Status "resolved"}}
-      <button hx-post="/ui/incidents/{{.Incident.ID}}/reopen"
-              hx-target="#detail-panel-content"
-              hx-swap="innerHTML"
-              class="px-3 py-1.5 text-xs font-semibold rounded-lg bg-amber-500/15 hover:bg-amber-500/25 text-amber-300 border border-amber-500/30 transition flex items-center gap-1.5"
-              title="Вернуть инцидент в открытые">
-        <svg class="w-3.5 h-3.5 text-amber-400" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"></path></svg>
-        <span>Переоткрыть</span>
+{{$inc := .Incident}}
+{{$state := "open"}}{{if eq $inc.Status "resolved"}}{{$state = "resolved"}}{{else if eq $inc.Status "ignored"}}{{$state = "ignored"}}{{else if $inc.IsRegression}}{{$state = "regression"}}{{end}}
+<div id="incident-detail" class="h-full flex flex-col" {{template "incident-data" $inc}} data-latest-release="{{.LatestRelease}}"
+     hx-get="/ui/incidents/{{$inc.ID}}" hx-trigger="incident-updated[isDrawerOpen()] from:body" hx-target="#detail-panel-content" hx-swap="innerHTML">
+  <header class="dh">
+    <button type="button" class="btn btn-icon btn-ghost h-ghost dh-close" onclick="closeDrawer()" aria-label="Закрыть" title="Закрыть">
+      <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M6 18L18 6M6 6l12 12"/></svg>
+    </button>
+    <div class="dh-top">
+      <nav class="dh-where" aria-label="Где находится ошибка">
+        {{if eq $state "regression"}}<span class="tag tag-amber">Регрессия</span>
+        {{else if eq $state "resolved"}}<span class="tag tag-green">Решена</span>
+        {{else if eq $state "ignored"}}<span class="tag tag-muted">Игнорируется</span>
+        {{else}}<span class="tag tag-red">Открыта</span>{{end}}
+        <span>{{if $inc.ProjectName}}{{$inc.ProjectName}}{{else}}Default Project{{end}}</span>
+        <span aria-hidden="true" style="color: var(--faint)">/</span>
+        <span class="mono">Ошибка #{{$inc.ID}}</span>
+      </nav>
+      {{if eq $inc.Status "resolved"}}
+      <button type="button" id="drawer-action" class="btn btn-surface h-btn" aria-haspopup="dialog" onclick="openReopenDialog(this)">
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"/></svg>Открыть снова
       </button>
       {{else}}
-      <div class="flex items-center gap-1.5">
-        <!-- Главная кнопка: ручной резолв -->
-        <button hx-post="/ui/incidents/{{.Incident.ID}}/resolve?type=immediate"
-                hx-target="#detail-panel-content"
-                hx-swap="innerHTML"
-                class="px-3 py-1.5 text-xs font-semibold rounded-lg bg-emerald-600/25 hover:bg-emerald-600/35 text-emerald-300 border border-emerald-500/40 transition flex items-center gap-1.5"
-                title="Пометить инцидент решённым вручную">
-          <svg class="w-3.5 h-3.5 text-emerald-400" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2.5" d="M5 13l4 4L19 7"></path></svg>
-          <span>Решено</span>
-        </button>
-
-        {{if .LatestRelease}}
-        <button hx-post="/ui/incidents/{{.Incident.ID}}/resolve?type=current"
-                hx-target="#detail-panel-content"
-                hx-swap="innerHTML"
-                class="px-2.5 py-1.5 text-xs font-medium rounded-lg bg-slate-800 hover:bg-slate-700 text-purple-300 border border-slate-700 transition"
-                title="Пометить решённым в текущем релизе {{.LatestRelease}}">
-          В {{.LatestRelease}}
-        </button>
-        {{end}}
-
-        <button hx-post="/ui/incidents/{{.Incident.ID}}/resolve?type=next"
-                hx-target="#detail-panel-content"
-                hx-swap="innerHTML"
-                class="px-2.5 py-1.5 text-xs font-medium rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-300 border border-slate-700 transition"
-                title="Пометить решённым в следующем релизе">
-          В след. релизе
-        </button>
-      </div>
-      {{end}}
-
-      <button onclick="closeDrawer()" 
-              class="p-2 rounded-lg text-slate-400 hover:text-white hover:bg-slate-800 transition-colors"
-              title="Закрыть (Esc)">
-        <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"></path>
-        </svg>
+      <button type="button" id="drawer-action" class="btn btn-primary h-primary" aria-haspopup="dialog" onclick="openResolveDialog(this)">
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M5 13l4 4L19 7"/></svg>Отметить решённой
       </button>
+      {{end}}
     </div>
+
+    <div class="dh-what">
+      <h2 id="drawer-title" class="dh-title" tabindex="-1"><span class="ns">{{namespace $inc.ExceptionClass}}</span>{{baseName $inc.ExceptionClass}}</h2>
+      <p id="incident-message-text" class="dh-msg">{{trim $inc.Message}}</p>
+      <button type="button" class="dh-more h-link" aria-expanded="false" aria-controls="incident-message-text" onclick="toggleMessage(this)" hidden>Показать полностью</button>
+    </div>
+
+    <dl class="hrow">
+      <div class="hcell-file">
+        <dt>Файл</dt>
+        <dd>{{if and .CodeSnippet .CodeSnippet.GitHubURL}}<a href="{{.CodeSnippet.GitHubURL}}" target="_blank" rel="noopener" class="hfile mono">{{baseName $inc.File}}:{{$inc.Line}}</a>{{else}}<span class="hfile mono" tabindex="0">{{baseName $inc.File}}:{{$inc.Line}}</span>{{end}}</dd>
+      </div>
+      <div class="hrest hcell"><dt>Событий</dt><dd style="font-weight: 600; font-variant-numeric: tabular-nums">{{$inc.EventsCount}}</dd></div>
+      <div class="hrest hcell"><dt>Впервые</dt><dd title="{{$inc.FirstSeenAt.Format "02.01.2006, 15:04:05"}}">{{$inc.FirstSeenAt.Format "02.01, 15:04"}}</dd></div>
+      <div class="hrest hcell"><dt>Последний раз</dt><dd><time datetime="{{$inc.LastSeenAt.Format "2006-01-02T15:04:05Z07:00"}}" title="{{$inc.LastSeenAt.Format "02.01.2006, 15:04:05"}}" data-rel>{{$inc.LastSeenAt.Format "02.01.2006, 15:04"}}</time></dd></div>
+      <div class="hrest hcell"><dt>Релиз</dt><dd class="mono">{{if $inc.LastRelease}}{{$inc.LastRelease}}{{else}}—{{end}}</dd></div>
+      <span class="hfull">
+        <span class="hfull-path mono" title="{{$inc.File}}:{{$inc.Line}}"><bdi>{{$inc.File}}:<span style="color: var(--blue)">{{$inc.Line}}</span></bdi></span>
+        {{if and .CodeSnippet .CodeSnippet.GitHubURL}}
+        <a href="{{.CodeSnippet.GitHubURL}}" target="_blank" rel="noopener" class="btn btn-icon btn-ghost h-ghost btn-xs" aria-label="Открыть в GitHub" title="Открыть в GitHub">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path fill-rule="evenodd" clip-rule="evenodd" d="M12 2C6.477 2 2 6.484 2 12.017c0 4.425 2.865 8.18 6.839 9.504.5.092.682-.217.682-.483 0-.237-.008-.868-.013-1.703-2.782.605-3.369-1.343-3.369-1.343-.454-1.158-1.11-1.466-1.11-1.466-.908-.62.069-.608.069-.608 1.003.07 1.53 1.032 1.53 1.032.892 1.53 2.341 1.088 2.91.832.092-.647.35-1.088.636-1.338-2.22-.253-4.555-1.113-4.555-4.951 0-1.093.39-1.988 1.029-2.688-.103-.253-.446-1.272.098-2.65 0 0 .84-.27 2.75 1.026A9.564 9.564 0 0112 6.844c.85.004 1.705.115 2.504.337 1.909-1.296 2.747-1.027 2.747-1.027.546 1.379.202 2.398.1 2.651.64.7 1.028 1.595 1.028 2.688 0 3.848-2.339 4.695-4.566 4.943.359.309.678.92.678 1.855 0 1.338-.012 2.419-.012 2.747 0 .268.18.58.688.482A10.019 10.019 0 0022 12.017C22 6.484 17.522 2 12 2z"/></svg>
+        </a>
+        {{end}}
+        {{template "copy-button" (printf "%s:%d" $inc.File $inc.Line)}}
+      </span>
+    </dl>
+
+    {{if eq $state "regression"}}
+    <div class="callout callout-amber">
+      <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#F0A83A" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z"/></svg>
+      <span>Ошибка вернулась{{if $inc.LastRelease}} в релизе <b class="mono">{{$inc.LastRelease}}</b>{{end}}, хотя была закрыта
+        {{- if eq $inc.ResolvedInRelease "next"}} до следующего релиза
+        {{- else if or (eq $inc.ResolvedInRelease "") (eq $inc.ResolvedInRelease "immediate") (eq $inc.ResolvedInRelease "current")}} вручную
+        {{- else}} в <b class="mono">{{$inc.ResolvedInRelease}}</b>{{end}}.</span>
+    </div>
+    {{else if eq $state "resolved"}}
+    <div class="callout callout-green">
+      <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#3FC98E" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M5 13l4 4L19 7"/></svg>
+      <span>{{if eq $inc.ResolvedInRelease "next"}}Решена в следующем релизе. Пока он не вышел, повторы не считаются.
+        {{- else if or (eq $inc.ResolvedInRelease "") (eq $inc.ResolvedInRelease "immediate") (eq $inc.ResolvedInRelease "current")}}Решена вручную. Любой повтор откроет её снова.
+        {{- else}}Решена в релизе <b class="mono">{{$inc.ResolvedInRelease}}</b>. Если ошибка повторится в более новом релизе, она откроется снова как регрессия.{{end}}</span>
+    </div>
+    {{end}}
+  </header>
+
+  <div role="tablist" aria-label="Разделы ошибки" class="dtabs">
+    <button type="button" role="tab" id="tab-stack" class="dtab h-tab" data-tab="stack" aria-controls="panel-stack" aria-selected="true">Стек вызовов</button>
+    <button type="button" role="tab" id="tab-context" class="dtab h-tab" data-tab="context" aria-controls="panel-context" aria-selected="false" tabindex="-1">Контекст</button>
+    <button type="button" role="tab" id="tab-breadcrumbs" class="dtab h-tab" data-tab="breadcrumbs" aria-controls="panel-breadcrumbs" aria-selected="false" tabindex="-1">Хлебные крошки{{with $inc.Breadcrumbs}}<span class="dtab-count">{{len .}}</span>{{end}}</button>
+    <button type="button" role="tab" id="tab-env" class="dtab h-tab" data-tab="env" aria-controls="panel-env" aria-selected="false" tabindex="-1">Окружение</button>
   </div>
 
-  <!-- Прокручиваемое тело шторки -->
-  <div class="flex-1 overflow-y-auto p-6 space-y-6">
-    
-    <!-- Баннер Регрессии -->
-    {{if .Incident.IsRegression}}
-    <div class="bg-amber-950/40 border border-amber-500/40 rounded-xl p-4 flex items-center gap-3.5 text-amber-200 shadow-lg">
-      <div class="p-2.5 rounded-lg bg-amber-500/20 text-amber-400 shrink-0">
-        <svg class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z"></path></svg>
-      </div>
-      <div class="text-xs space-y-0.5">
-        <div class="font-bold text-amber-300 text-sm flex items-center gap-2">
-          <span>Регрессия обнаружена!</span>
+  <div class="dbody">
+    <div role="tabpanel" id="panel-stack" aria-labelledby="tab-stack" class="dpanel">
+      <section class="dsec">
+        <div class="dsec-head">
+          <h3>Место ошибки</h3>
+          <div class="flex items-center gap-3 flex-wrap" style="font-size: 13px">
+            {{if and .CodeSnippet .CodeSnippet.GitHubURL}}<a href="{{.CodeSnippet.GitHubURL}}" target="_blank" rel="noopener" class="h-link" style="text-decoration: none">Открыть в GitHub</a>{{end}}
+            {{if .IssueURL}}<a href="{{.IssueURL}}" target="_blank" rel="noopener" class="h-link" style="text-decoration: none">Создать issue</a>{{end}}
+          </div>
         </div>
-        <div class="text-amber-200/90 leading-relaxed">
-          Ошибка снова возникла в релизе <span class="font-mono font-bold text-white px-1 py-0.5 rounded bg-amber-900/40 border border-amber-700/50">{{.Incident.LastRelease}}</span> после того, как была ранее закрыта в <span class="font-mono font-semibold">{{.Incident.ResolvedInRelease}}</span>.
-        </div>
-      </div>
-    </div>
-    {{end}}
-
-    <!-- Баннер Решённого инцидента -->
-    {{if eq .Incident.Status "resolved"}}
-    <div class="bg-emerald-950/30 border border-emerald-500/30 rounded-xl p-4 flex items-center gap-3.5 text-emerald-200 shadow-sm">
-      <div class="p-2.5 rounded-lg bg-emerald-500/20 text-emerald-400 shrink-0">
-        <svg class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7"></path></svg>
-      </div>
-      <div class="text-xs space-y-0.5">
-        <div class="font-bold text-emerald-300 text-sm">Инцидент решён</div>
-        <div class="text-emerald-200/90">
-          Помечен решённым в релизе <span class="font-mono font-bold text-white px-1 py-0.5 rounded bg-emerald-900/40 border border-emerald-700/50">{{.Incident.ResolvedInRelease}}</span>{{if .Incident.ResolvedAt}} ({{.Incident.ResolvedAt.Format "02.01.2006 15:04"}}){{end}}. Повторения из более ранних версий глушатся и не вызывают оповещений.
-        </div>
-      </div>
-    </div>
-    {{end}}
-
-    <!-- Сообщение об ошибке (Error Message Banner) -->
-    <div class="bg-rose-950/20 border border-rose-900/40 rounded-xl p-4 relative group">
-      <div class="flex items-start justify-between gap-4">
-        <div class="space-y-1 flex-1 min-w-0">
-          <div class="text-xs font-semibold uppercase tracking-wider text-rose-400/90">Сообщение исключения</div>
-          <div id="incident-message-text" class="text-sm text-rose-200 font-mono leading-relaxed whitespace-pre-wrap break-all select-all">{{trim .Incident.Message}}</div>
-        </div>
-        <button onclick="copyText(document.getElementById('incident-message-text').innerText.trim(), 'Сообщение скопировано!')"
-                class="shrink-0 p-2 text-slate-400 hover:text-white bg-slate-800/80 hover:bg-slate-700 rounded-lg transition"
-                title="Копировать сообщение">
-          <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 16H6a2 2 0 01-2-2V6a2 2 0 012-2h8a2 2 0 012 2v2m-6 12h8a2 2 0 002-2v-8a2 2 0 00-2-2h-8a2 2 0 00-2 2v8a2 2 0 002 2z"></path></svg>
-        </button>
-      </div>
-    </div>
-
-    <!-- Информационная сетка (Мета-данные: Проект, Релизы, Среда, Сервер, Файл, URL) -->
-    <div class="grid grid-cols-1 sm:grid-cols-2 gap-3 text-xs">
-      <!-- Проект -->
-      <div class="bg-slate-800/40 border border-slate-800 rounded-xl p-3.5 flex flex-col justify-between">
-        <span class="text-slate-500 font-medium mb-1">Проект / Сервис</span>
-        <div class="font-semibold text-indigo-300 flex items-center gap-1.5 select-all">
-          <svg class="w-3.5 h-3.5 text-indigo-400 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M3 7v10a2 2 0 002 2h14a2 2 0 002-2V9a2 2 0 00-2-2h-6l-2-2H5a2 2 0 00-2 2z"></path></svg>
-          {{if .Incident.ProjectName}}{{.Incident.ProjectName}}{{else}}Default Project{{end}}
-          <span class="text-[11px] font-normal text-slate-500">(ID: #{{.Incident.ProjectID}})</span>
-        </div>
-      </div>
-
-      <!-- Релизы (First / Last) -->
-      <div class="bg-slate-800/40 border border-slate-800 rounded-xl p-3.5 flex flex-col justify-between">
-        <span class="text-slate-500 font-medium mb-1">Версии приложения (Релизы)</span>
-        <div class="font-mono text-purple-300 flex items-center gap-2 select-all flex-wrap">
-          <span title="Первый релиз">Впервые: <strong class="text-purple-200">{{if .Incident.FirstRelease}}{{.Incident.FirstRelease}}{{else}}—{{end}}</strong></span>
-          <span class="text-slate-600">|</span>
-          <span title="Последний релиз">Крайний: <strong class="text-white">{{if .Incident.LastRelease}}{{.Incident.LastRelease}}{{else}}—{{end}}</strong></span>
-        </div>
-      </div>
-
-      <!-- Среда (Environment) -->
-      <div class="bg-slate-800/40 border border-slate-800 rounded-xl p-3.5 flex flex-col justify-between">
-        <span class="text-slate-500 font-medium mb-1">Окружение (Environment)</span>
-        <div class="font-mono text-emerald-400 font-semibold select-all flex items-center gap-1.5">
-          <span class="w-2 h-2 rounded-full bg-emerald-400"></span>
-          {{if .Incident.Environment}}{{.Incident.Environment}}{{else}}production{{end}}
-        </div>
-      </div>
-
-      <!-- Версия PHP -->
-      <div class="bg-slate-800/40 border border-slate-800 rounded-xl p-3.5 flex flex-col justify-between">
-        <span class="text-slate-500 font-medium mb-1">Версия PHP</span>
-        <div class="font-mono text-blue-300 font-semibold select-all flex items-center gap-1.5">
-          {{if .Incident.PHPVersion}}
-          <span class="px-1.5 py-0.5 rounded bg-blue-500/10 border border-blue-500/20 text-blue-300">
-            PHP {{.Incident.PHPVersion}}
-          </span>
-          {{else}}
-          <span class="text-slate-600 font-normal">Не указана</span>
-          {{end}}
-        </div>
-      </div>
-
-      <!-- Сервер / Хост (AppURL) -->
-      <div class="bg-slate-800/40 border border-slate-800 rounded-xl p-3.5 flex flex-col justify-between">
-        <span class="text-slate-500 font-medium mb-1">Сервер / Хост приложения</span>
-        <div class="font-mono text-slate-200 break-all select-all flex items-center gap-1.5">
-          <svg class="w-3.5 h-3.5 text-sky-400 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 12h14M5 12a2 2 0 01-2-2V6a2 2 0 012-2h14a2 2 0 012 2v4a2 2 0 01-2 2M5 12a2 2 0 00-2 2v4a2 2 0 002 2h14a2 2 0 002-2v-4a2 2 0 00-2-2m-2-4h.01M17 16h.01"></path></svg>
-          {{if .Incident.AppURL}}
-          <a href="{{.Incident.AppURL}}" target="_blank" class="text-sky-300 hover:text-sky-200 hover:underline">
-            {{.Incident.AppURL}}
-          </a>
-          {{else}}
-          <span class="text-slate-600">Не указан</span>
-          {{end}}
-        </div>
-      </div>
-
-      <!-- Файл и строка -->
-      <div class="bg-slate-800/40 border border-slate-800 rounded-xl p-3.5 flex flex-col justify-between">
-        <span class="text-slate-500 font-medium mb-1">Файл и строка</span>
-        <div class="font-mono text-slate-200 break-all select-all">
-          {{.Incident.File}}:<span class="text-amber-400 font-bold">{{.Incident.Line}}</span>
-        </div>
-      </div>
-
-      <!-- Запрос (Endpoint) -->
-      <div class="bg-slate-800/40 border border-slate-800 rounded-xl p-3.5 flex flex-col justify-between">
-        <span class="text-slate-500 font-medium mb-1">URL запроса (Endpoint)</span>
-        <div class="font-mono text-slate-200 break-all select-all">
-          {{if .Incident.RequestURL}}{{.Incident.RequestURL}}{{else}}<span class="text-slate-600">Не указан</span>{{end}}
-        </div>
-      </div>
-
-      <!-- Первое появление -->
-      <div class="bg-slate-800/40 border border-slate-800 rounded-xl p-3.5 flex flex-col justify-between">
-        <span class="text-slate-500 font-medium mb-1">Впервые зафиксировано</span>
-        <div class="font-mono text-slate-300">
-          {{.Incident.FirstSeenAt.Format "02.01.2006 15:04:05"}}
-        </div>
-      </div>
-
-      <!-- Последнее появление -->
-      <div class="bg-slate-800/40 border border-slate-800 rounded-xl p-3.5 flex flex-col justify-between">
-        <span class="text-slate-500 font-medium mb-1">Последний инцидент</span>
-        <div class="font-mono text-slate-300">
-          {{.Incident.LastSeenAt.Format "02.01.2006 15:04:05"}}
-        </div>
-      </div>
-    </div>
-
-    <!-- Блок контекста исходного кода (Code Snippet & GitHub Integration) -->
-    {{if .CodeSnippet}}
-    <div class="space-y-2" id="code-snippet-section">
-      <div class="flex items-center justify-between gap-2 flex-wrap">
-        <span class="text-xs font-semibold uppercase tracking-wider text-slate-400 flex items-center gap-2">
-          <svg class="w-4 h-4 text-emerald-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10 20l4-16m4 4l4 4-4 4M6 16l-4-4 4-4" />
-          </svg>
-          Место вызова ошибки
-          {{if eq .CodeSnippet.Source "github"}}
-          <span class="px-1.5 py-0.2 rounded text-[10px] font-mono bg-purple-500/20 text-purple-300 border border-purple-500/30">GitHub API</span>
-          {{else if eq .CodeSnippet.Source "client"}}
-          <span class="px-1.5 py-0.2 rounded text-[10px] font-mono bg-emerald-500/20 text-emerald-300 border border-emerald-500/30">Client Snippet</span>
-          {{end}}
-        </span>
-
-        <div class="flex items-center gap-2">
-          {{if .CodeSnippet.GitHubURL}}
-          <a href="{{.CodeSnippet.GitHubURL}}" target="_blank" rel="noopener noreferrer"
-             class="px-2.5 py-1 text-xs rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-200 border border-slate-700 hover:border-slate-600 transition flex items-center gap-1.5 font-medium shadow-sm"
-             title="Открыть файл и строку в GitHub">
-            <svg class="w-3.5 h-3.5 text-white" fill="currentColor" viewBox="0 0 24 24">
-              <path fill-rule="evenodd" clip-rule="evenodd" d="M12 2C6.477 2 2 6.484 2 12.017c0 4.425 2.865 8.18 6.839 9.504.5.092.682-.217.682-.483 0-.237-.008-.868-.013-1.703-2.782.605-3.369-1.343-3.369-1.343-.454-1.158-1.11-1.466-1.11-1.466-.908-.62.069-.608.069-.608 1.003.07 1.53 1.032 1.53 1.032.892 1.53 2.341 1.088 2.91.832.092-.647.35-1.088.636-1.338-2.22-.253-4.555-1.113-4.555-4.951 0-1.093.39-1.988 1.029-2.688-.103-.253-.446-1.272.098-2.65 0 0 .84-.27 2.75 1.026A9.564 9.564 0 0112 6.844c.85.004 1.705.115 2.504.337 1.909-1.296 2.747-1.027 2.747-1.027.546 1.379.202 2.398.1 2.651.64.7 1.028 1.595 1.028 2.688 0 3.848-2.339 4.695-4.566 4.943.359.309.678.92.678 1.855 0 1.338-.012 2.419-.012 2.747 0 .268.18.58.688.482A10.019 10.019 0 0022 12.017C22 6.484 17.522 2 12 2z"/>
-            </svg>
-            <span>Открыть в GitHub</span>
-          </a>
-          {{end}}
-
-          {{if .IssueURL}}
-          <a href="{{.IssueURL}}" target="_blank" rel="noopener noreferrer"
-             class="px-2.5 py-1 text-xs rounded-lg bg-indigo-600/20 hover:bg-indigo-600/30 text-indigo-300 border border-indigo-500/30 hover:border-indigo-500/50 transition flex items-center gap-1.5 font-medium shadow-sm"
-             title="Создать Issue в репозитории">
-            <svg class="w-3.5 h-3.5 text-indigo-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z"/>
-            </svg>
-            <span>Создать Issue</span>
-          </a>
-          {{end}}
-        </div>
-      </div>
-
-      <!-- Контейнер с кодом -->
-      <div class="bg-slate-950 border border-slate-800 rounded-xl overflow-hidden shadow-inner text-xs font-mono">
-        <div class="px-3.5 py-2 bg-slate-900/80 border-b border-slate-800 flex items-center justify-between text-slate-400">
-          <span class="break-all text-slate-300 font-semibold">{{.CodeSnippet.File}}:<span class="text-rose-400 font-bold">{{.CodeSnippet.Line}}</span></span>
-          <span class="text-[11px] text-slate-500">Строка ошибки: <strong class="text-rose-400">{{.CodeSnippet.Line}}</strong></span>
-        </div>
-
-        {{if .CodeSnippet.Lines}}
-        <div class="overflow-x-auto py-1">
-          <table class="w-full border-collapse">
-            <tbody>
-              {{range .CodeSnippet.Lines}}
-              <tr class="{{if .IsError}}bg-rose-950/50 border-l-2 border-rose-500 text-rose-200 font-bold{{else}}hover:bg-slate-900/50 text-slate-400{{end}} leading-relaxed">
-                <td class="w-12 py-0.5 pr-3 text-right select-none font-mono text-[11px] {{if .IsError}}text-rose-400 font-bold bg-rose-500/10{{else}}text-slate-600{{end}}">
-                  {{.Number}}
-                </td>
-                <td class="py-0.5 pl-2 pr-4 font-mono whitespace-pre select-all {{if .IsError}}text-rose-200{{else}}text-slate-300{{end}}">
-                  {{.Code}}
-                </td>
-              </tr>
-              {{end}}
-            </tbody>
-          </table>
+        {{if and .CodeSnippet .CodeSnippet.Lines}}
+        <div class="snippet">
+          <div class="snippet-file mono">{{.CodeSnippet.File}}:{{.CodeSnippet.Line}}</div>
+          <div class="snippet-code mono">
+            {{range .CodeSnippet.Lines}}<div class="sl{{if .IsError}} sl-hit{{end}}"><span class="sl-n">{{.Number}}</span><span class="sl-code">{{if .Code}}{{.Code}}{{else}} {{end}}</span></div>{{end}}
+          </div>
         </div>
         {{else}}
-        <div class="p-4 text-center text-slate-500 text-xs">
-          Фрагмент кода недоступен для локального отображения
-        </div>
+        <div class="note-dashed">{{.SnippetNote}}</div>
         {{end}}
-      </div>
-    </div>
-    {{end}}
+      </section>
 
-    <!-- Стек-трейс (Stack Trace) -->
-    <div class="space-y-2.5" id="stack-trace-section">
-      <div class="flex flex-wrap items-center justify-between gap-2">
-        <span class="text-xs font-semibold uppercase tracking-wider text-slate-400 flex items-center gap-2">
-          <svg class="w-4 h-4 text-slate-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10 20l4-16m4 4l4 4-4 4M6 16l-4-4 4-4" />
-          </svg>
-          Стек вызовов (Stack Trace)
-        </span>
-
-        <div class="flex items-center gap-2">
-          <!-- Фильтр vendor / код приложения -->
-          <div class="inline-flex items-center p-0.5 bg-slate-950 border border-slate-800 rounded-lg text-xs">
-            <button type="button" 
-                    id="btn-filter-app"
-                    onclick="setStackTraceFilter('app')"
-                    class="px-2.5 py-1 rounded-md transition flex items-center gap-1.5 font-medium bg-rose-500/15 text-rose-300 border border-rose-500/30"
-                    title="Показать только вызовы приложения (скрыть vendor)">
-              <span>Без vendor</span>
-              <span id="badge-app-count" class="px-1.5 py-0.2 rounded-full text-[10px] bg-rose-500/25 text-rose-200 font-mono">{{.Incident.StackTraceStats.AppFrames}}</span>
-            </button>
-            <button type="button" 
-                    id="btn-filter-all"
-                    onclick="setStackTraceFilter('all')"
-                    class="px-2.5 py-1 rounded-md transition flex items-center gap-1.5 font-medium text-slate-400 hover:text-slate-200 hover:bg-slate-800/60 border border-transparent"
-                    title="Показать все вызовы включая vendor">
-              <span>Все</span>
-              <span id="badge-all-count" class="px-1.5 py-0.2 rounded-full text-[10px] bg-slate-800 text-slate-400 font-mono">{{.Incident.StackTraceStats.TotalFrames}}</span>
+      <section class="dsec">
+        <div class="dsec-head">
+          <h3>Вызовы</h3>
+          <div class="flex gap-2 flex-wrap">
+            <div role="group" aria-label="Вид вызовов" class="segments segments-sm">
+              <button type="button" class="seg h-seg" data-stack-view="list" aria-pressed="true">Список</button>
+              <button type="button" class="seg h-seg" data-stack-view="graph" aria-pressed="false">Схема</button>
+            </div>
+            {{if .VendorFrames}}<button type="button" class="btn h-btn" data-vendor-toggle data-count="{{.VendorFrames}}" aria-pressed="false">Показать vendor ({{.VendorFrames}})</button>{{end}}
+            <button type="button" class="btn h-btn copy-btn" data-copy="{{$inc.StackTrace}}" aria-label="Копировать стек вызовов">
+              <svg class="i-copy" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M8 16H6a2 2 0 01-2-2V6a2 2 0 012-2h8a2 2 0 012 2v2m-6 12h8a2 2 0 002-2v-8a2 2 0 00-2-2h-8a2 2 0 00-2 2v8a2 2 0 002 2z"/></svg><svg class="i-check" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M5 13l4 4L19 7"/></svg>Копировать
             </button>
           </div>
-
-          <!-- Кнопка копирования -->
-          <button id="copy-stack-btn"
-                  onclick="copyActiveStackTrace()"
-                  class="px-2.5 py-1 text-xs bg-slate-800 hover:bg-slate-700 text-slate-300 hover:text-white rounded-lg border border-slate-700 transition flex items-center gap-1.5"
-                  title="Копировать текущий стек-трейс">
-            <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 16H6a2 2 0 01-2-2V6a2 2 0 012-2h8a2 2 0 012 2v2m-6 12h8a2 2 0 002-2v-8a2 2 0 00-2-2h-8a2 2 0 00-2 2v8a2 2 0 002 2z"></path></svg>
-            <span>Копировать</span>
-          </button>
         </div>
-      </div>
 
-      <!-- Окно стек-трейса -->
-      <div class="relative bg-slate-950 border border-slate-800 rounded-xl overflow-hidden shadow-inner">
-        <!-- Вид: Без vendor (App Only) -->
-        <div id="stack-trace-app-view">
-          {{if .Incident.AppStackTrace}}
-            <pre id="app-stack-trace" class="p-4 text-xs font-mono text-slate-200 overflow-x-auto leading-relaxed max-h-[460px] select-all whitespace-pre">{{trim .Incident.AppStackTrace}}</pre>
-          {{else if .Incident.StackTrace}}
-            <div class="p-6 text-center text-slate-400 text-xs flex flex-col items-center justify-center gap-2">
-              <svg class="w-7 h-7 text-slate-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
-              </svg>
-              <span>Все вызовы в стек-трейсе происходят внутри <code class="px-1.5 py-0.5 rounded bg-slate-900 border border-slate-800 text-rose-400 font-mono">vendor</code> (код приложения не затронут в цепочке вызовов)</span>
-              <button type="button" onclick="setStackTraceFilter('all')" class="mt-1 px-3 py-1.5 bg-slate-800 hover:bg-slate-700 text-slate-200 rounded-lg border border-slate-700 transition flex items-center gap-1.5">
-                Показать полный стек-трейс
-              </button>
+        {{if .StackGroups}}
+        <div class="frames" data-view="list">
+          {{range .StackGroups}}
+            {{if .Vendor}}
+            <details class="vgroup">
+              <summary class="frame-group h-group">
+                <svg class="chev" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M9 5l7 7-7 7"/></svg>
+                {{len .Frames}} {{plural (len .Frames) "кадр" "кадра" "кадров"}} из vendor
+              </summary>
+              {{range .Frames}}{{template "stack-frame" .}}{{end}}
+            </details>
+            {{else}}{{range .Frames}}{{template "stack-frame" .}}{{end}}{{end}}
+          {{end}}
+        </div>
+
+        <div class="graph" data-view="graph" hidden>
+          <p class="graph-note">Сверху точка входа, ниже каждый следующий вызов, внизу место, где брошено исключение.</p>
+          {{range $i, $n := .CallGraph}}
+            {{if $i}}<div class="graph-arrow" aria-hidden="true"><span class="graph-line"></span><span class="mono">{{$n.Via}}</span></div>{{end}}
+            <div class="graph-node{{if not $n.Vendor}} is-app{{end}}">
+              <span class="graph-tag">{{if $n.Vendor}}vendor{{else}}ваш код{{end}}</span>
+              <div class="graph-text">
+                {{if $n.Group}}
+                <span class="graph-title">{{$n.Count}} {{plural $n.Count "кадр" "кадра" "кадров"}} из vendor</span>
+                {{with $n.Packages}}<span class="graph-calls">{{join . ", "}}</span>{{end}}
+                {{else}}
+                <span class="graph-title">{{if $n.Class}}<span class="ns">{{namespace $n.Class}}</span>{{baseName $n.Class}}{{else}}{{baseName $n.File}}{{end}}</span>
+                <span class="graph-calls">{{join $n.Calls ", "}}</span>
+                {{if $n.File}}<span class="graph-where">{{baseName $n.File}}</span>{{end}}
+                {{end}}
+              </div>
             </div>
-          {{else}}
-            <div class="p-6 text-center text-slate-500 text-xs font-mono">Стек-трейс не передан</div>
           {{end}}
+          {{if .CallGraph}}<div class="graph-arrow" aria-hidden="true"><span class="graph-line"></span><span class="mono">throw</span></div>{{end}}
+          <div class="graph-node is-throw">
+            <span class="graph-tag">throw</span>
+            <div class="graph-text">
+              <span class="graph-title"><span class="ns">{{namespace $inc.ExceptionClass}}</span>{{baseName $inc.ExceptionClass}}</span>
+              <span class="graph-calls">{{trim $inc.Message}}</span>
+              <span class="graph-where">{{baseName $inc.File}}:{{$inc.Line}}</span>
+            </div>
+          </div>
         </div>
+        {{else}}
+        <div class="note-dashed">Клиент не прислал стек вызовов.</div>
+        {{end}}
+      </section>
+    </div>
 
-        <!-- Вид: Все вызовы (Full Stack Trace) -->
-        <div id="stack-trace-all-view" class="hidden">
-          {{if .Incident.StackTrace}}
-            <pre id="raw-stack-trace" class="p-4 text-xs font-mono text-slate-300 overflow-x-auto leading-relaxed max-h-[460px] select-all whitespace-pre">{{trim .Incident.StackTrace}}</pre>
-          {{else}}
-            <div class="p-6 text-center text-slate-500 text-xs font-mono">Стек-трейс не передан</div>
+    <div role="tabpanel" id="panel-context" aria-labelledby="tab-context" class="dpanel" hidden>
+      {{with $inc.AppContext}}
+        {{with .Exception}}{{template "ctx-block" (dict "Title" "Контекст исключения" "Sub" "Exception::context()" "Data" .)}}{{end}}
+        {{with .Shared}}{{template "ctx-block" (dict "Title" "Общий контекст" "Sub" "Laravel Context" "Data" .)}}{{end}}
+      {{end}}
+      {{if not (and $inc.AppContext (or $inc.AppContext.Exception $inc.AppContext.Shared))}}
+      <p class="note-dashed">Приложение не передало свой контекст. Данные из <a href="https://laravel.com/docs/context" target="_blank" rel="noopener" class="h-link" style="text-decoration: none">Laravel Context</a> и метода <code class="mono" style="font-size: 12px; color: var(--text-2)">context()</code> исключения появятся здесь.</p>
+      {{end}}
+
+      {{if or $inc.HTTPRequest $inc.RequestURL $inc.Route $inc.QueueJob (eq $inc.ExecutionType "queue") (eq $inc.ExecutionType "console")}}
+      <div class="kv-card">
+        {{if or $inc.HTTPRequest $inc.RequestURL}}
+        <h3 class="kv-title">HTTP-запрос</h3>
+        <dl class="kv">
+          <div class="kv-row"><dt>Запрос</dt><dd>{{with $inc.HTTPRequest}}{{if .Method}}{{.Method}} {{end}}{{if .URL}}{{.URL}}{{else}}{{$inc.RequestURL}}{{end}}{{else}}{{$inc.RequestURL}}{{end}}</dd></div>
+          {{with $inc.HTTPRequest}}
+          <div class="kv-row"><dt>IP клиента</dt><dd>{{if .ClientIP}}{{.ClientIP}}{{else}}—{{end}}</dd></div>
+          {{with .QueryParams}}<div class="kv-row"><dt>Параметры</dt><dd>{{jsonPretty .}}</dd></div>{{end}}
           {{end}}
-        </div>
+        </dl>
+        {{with $inc.HTTPRequest}}
+        {{with .Headers}}
+        <details class="kv-details">
+          <summary class="h-group"><svg class="chev" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M9 5l7 7-7 7"/></svg>Заголовки<span class="kv-count">{{len .}}</span></summary>
+          <dl class="kv">{{range $k, $v := .}}<div class="kv-row"><dt class="mono">{{$k}}</dt><dd{{if eq $v "[FILTERED]"}} class="is-filtered"{{end}}>{{$v}}</dd></div>{{end}}</dl>
+        </details>
+        {{end}}
+        {{with .Body}}
+        <details class="kv-details">
+          <summary class="h-group"><svg class="chev" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M9 5l7 7-7 7"/></svg>Тело<span class="kv-count">{{len .}}</span></summary>
+          <pre class="kv-pre mono">{{jsonPretty .}}</pre>
+        </details>
+        {{end}}
+        {{end}}
+        {{end}}
+
+        {{with $inc.Route}}
+        <h3 class="kv-title">Маршрут</h3>
+        <dl class="kv">
+          <div class="kv-row"><dt>Имя</dt><dd>{{if .Name}}{{.Name}}{{else}}—{{end}}</dd></div>
+          <div class="kv-row"><dt>Действие</dt><dd>{{if .Action}}{{.Action}}{{else}}—{{end}}</dd></div>
+          {{with .Middleware}}<div class="kv-row"><dt>Middleware</dt><dd>{{join . ", "}}</dd></div>{{end}}
+          {{with .Parameters}}<div class="kv-row"><dt>Параметры</dt><dd>{{jsonPretty .}}</dd></div>{{end}}
+        </dl>
+        {{end}}
+
+        {{if or $inc.QueueJob (eq $inc.ExecutionType "queue")}}
+        <h3 class="kv-title">Задача в очереди</h3>
+        <dl class="kv">
+          {{with $inc.QueueJob}}
+          <div class="kv-row"><dt>Класс задачи</dt><dd>{{if .JobName}}{{.JobName}}{{else}}—{{end}}</dd></div>
+          <div class="kv-row"><dt>Очередь</dt><dd>{{if .Queue}}{{.Queue}}{{else}}default{{end}}</dd></div>
+          <div class="kv-row"><dt>Соединение</dt><dd>{{if .Connection}}{{.Connection}}{{else}}—{{end}}</dd></div>
+          <div class="kv-row"><dt>Попытка</dt><dd>{{.Attempts}}{{with .MaxTries}} из {{.}}{{end}}</dd></div>
+          {{if gt .Timeout 0}}<div class="kv-row"><dt>Таймаут</dt><dd>{{.Timeout}} с</dd></div>{{end}}
+          {{else}}
+          <div class="kv-row"><dt>Задача</dt><dd>Клиент не прислал данные задачи</dd></div>
+          {{end}}
+        </dl>
+        {{end}}
+
+        {{if eq $inc.ExecutionType "console"}}
+        <h3 class="kv-title">Команда</h3>
+        <dl class="kv">
+          <div class="kv-row"><dt>Команда</dt><dd>{{with $inc.Execution}}{{if .Command}}php artisan {{.Command}}{{else}}—{{end}}{{else}}—{{end}}</dd></div>
+        </dl>
+        {{end}}
       </div>
+      {{end}}
     </div>
 
-    <!-- Хэш дедупликации -->
-    <div class="pt-4 border-t border-slate-800 flex items-center justify-between text-[11px] text-slate-500 font-mono">
-      <span>Хэш группы: {{.Incident.Hash}}</span>
-      <span>Project ID: {{.Incident.ProjectID}}</span>
+    <div role="tabpanel" id="panel-breadcrumbs" aria-labelledby="tab-breadcrumbs" class="dpanel" hidden>
+      {{if $inc.Breadcrumbs}}
+      <ol class="crumbs">
+        {{range $inc.Breadcrumbs}}
+        <li class="crumb crumb-{{.Level}}">
+          <span class="crumb-time mono">{{formatTimestamp .Timestamp}}</span>
+          <span class="crumb-rail"><span class="crumb-line"></span><span class="crumb-dot"></span></span>
+          <span class="crumb-body">
+            <span class="crumb-cat">{{if eq .Category "sql"}}SQL-запрос{{else if eq .Category "http"}}HTTP-вызов{{else if eq .Category "log"}}Лог{{else if eq .Category "queue"}}Очередь{{else if eq .Category "cache"}}Кэш{{else}}{{.Category}}{{end}}
+              {{if or (eq .Level "warning") (eq .Level "error")}}<span class="crumb-level">{{.Level}}</span>{{end}}</span>
+            <span class="crumb-msg mono">{{.Message}}</span>
+            {{with .Data}}
+            <details class="kv-details crumb-data">
+              <summary class="h-group"><svg class="chev" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M9 5l7 7-7 7"/></svg>Данные<span class="kv-count">{{len .}}</span></summary>
+              <pre class="kv-pre mono">{{jsonPretty .}}</pre>
+            </details>
+            {{end}}
+          </span>
+        </li>
+        {{end}}
+        <li class="crumb crumb-final">
+          <span class="crumb-time">ошибка</span>
+          <span class="crumb-rail"><span class="crumb-dot"></span></span>
+          <span class="crumb-msg mono">{{baseName $inc.ExceptionClass}}</span>
+        </li>
+      </ol>
+      {{else}}
+      <div class="empty-dashed">
+        <div style="font-size: 15px; font-weight: 600">Хлебных крошек нет</div>
+        <div style="max-width: 440px; font-size: 13px; line-height: 1.5; color: var(--muted)">Клиент записывает SQL-запросы, HTTP-вызовы и логи, которые были перед ошибкой. Включите breadcrumbs в config/larasentry.php, чтобы они появились здесь.</div>
+      </div>
+      {{end}}
     </div>
 
+    <div role="tabpanel" id="panel-env" aria-labelledby="tab-env" class="dpanel" hidden>
+      {{$sys := $inc.System}}
+      <dl class="kv-card env">
+        {{template "env-row" (dict "Label" "Окружение" "Value" (or $inc.Environment "production"))}}
+        {{template "env-row" (dict "Label" "PHP" "Value" (or (and $sys $sys.PHPVersion) $inc.PHPVersion))}}
+        {{template "env-row" (dict "Label" "Laravel" "Value" (or (and $sys $sys.LaravelVersion) $inc.LaravelVersion))}}
+        {{template "env-row" (dict "Label" "Сервер приложения" "Value" $inc.AppURL)}}
+        {{with $sys}}
+        {{template "env-row" (dict "Label" "Имя хоста" "Value" .Hostname)}}
+        {{template "env-row" (dict "Label" "ОС" "Value" .OS)}}
+        {{template "env-row" (dict "Label" "SAPI" "Value" .SAPI)}}
+        {{template "env-row" (dict "Label" "Локаль" "Value" .Locale)}}
+        {{if .MemoryPeakBytes}}{{template "env-row" (dict "Label" "Пик памяти" "Value" (formatBytes .MemoryPeakBytes))}}{{end}}
+        {{if .MemoryUsageBytes}}{{template "env-row" (dict "Label" "Память при ошибке" "Value" (formatBytes .MemoryUsageBytes))}}{{end}}
+        {{if .DurationMS}}{{template "env-row" (dict "Label" "Время до ошибки" "Value" (formatDuration .DurationMS))}}{{end}}
+        {{template "env-row" (dict "Label" "Кэш конфигурации" "Value" (yesNo .ConfigCached))}}
+        {{template "env-row" (dict "Label" "Кэш маршрутов" "Value" (yesNo .RoutesCached))}}
+        {{end}}
+        {{with $inc.HTTPRequest}}{{template "env-row" (dict "Label" "IP клиента" "Value" .ClientIP)}}{{end}}
+        {{template "env-row" (dict "Label" "Первый релиз" "Value" $inc.FirstRelease)}}
+        {{template "env-row" (dict "Label" "Хэш группы" "Value" $inc.Hash)}}
+        {{template "env-row" (dict "Label" "Проект" "Value" (printf "%s (ID %d)" (or $inc.ProjectName "Default Project") $inc.ProjectID))}}
+      </dl>
+      {{if not $sys}}<p class="note-dashed" style="margin-top: 12px">Клиент не прислал данные о системе. Подключите сборщик SystemContext, чтобы здесь появились память, время выполнения и состояние кэшей.</p>{{end}}
+    </div>
   </div>
 </div>
+
+{{define "stack-frame"}}
+<div class="frow h-frame{{if not .Vendor}} is-app{{end}}">
+  <span class="f-n mono">#{{.Index}}</span>
+  <span class="fmethod mono">{{if .Class}}<span class="f-cls">{{.ShortClass}}{{.Sep}}</span>{{end}}<span class="f-m">{{.Method}}</span></span>
+  {{if .File}}
+  <span class="ffile mono" tabindex="0">{{.FileName}}{{if .Line}}:<span class="f-line">{{.Line}}</span>{{end}}</span>
+  <span class="ffull">
+    <span class="ffull-path mono" title="{{.File}}{{if .Line}}:{{.Line}}{{end}}"><bdi>{{.File}}{{if .Line}}:<span style="color: var(--blue)">{{.Line}}</span>{{end}}</bdi></span>
+    {{template "copy-button" (printf "%s:%d" .File .Line)}}
+  </span>
+  {{end}}
+</div>
+{{end}}
+
+{{define "ctx-block"}}
+{{$truncated := index .Data "_truncated"}}
+<section class="ctx-block" aria-label="{{.Title}}">
+  <div class="ctx-head">
+    <h3>{{.Title}}<span class="mono">{{.Sub}}</span></h3>
+    {{if not $truncated}}
+    <span class="ctx-count">{{len .Data}} {{plural (len .Data) "ключ" "ключа" "ключей"}}</span>
+    {{template "copy-button" (jsonPretty .Data)}}
+    {{end}}
+  </div>
+  {{if $truncated}}
+  <div class="callout callout-amber" style="margin: 12px 14px; align-items: flex-start; font-size: 13px; line-height: 1.5">
+    <svg style="margin-top: 2px" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#F0A83A" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z"/></svg>
+    <span>Контекст занял {{ctxValue (index .Data "_size")}} байт — больше лимита клиента, поэтому данные не отправлены. Лимит задаёт LARASENTRY_MAX_CONTEXT_BYTES, по умолчанию 16 384 байт.</span>
+  </div>
+  {{else}}
+  <dl class="kv">
+    {{range $k, $v := .Data}}{{$text := ctxValue $v}}
+    <div class="kv-row"><dt class="mono">{{$k}}</dt><dd class="{{if eq $text "[FILTERED]"}}is-filtered{{end}}">{{$text}}</dd></div>
+    {{end}}
+  </dl>
+  {{end}}
+</section>
+{{end}}
+
+{{define "env-row"}}
+<div class="kv-row env-row">
+  <dt>{{.Label}}</dt>
+  <dd{{if not .Value}} class="is-empty"{{end}}>{{if .Value}}{{.Value}}{{else}}—{{end}}</dd>
+  {{if .Value}}{{template "copy-button" .Value}}{{else}}<span></span>{{end}}
+</div>
+{{end}}

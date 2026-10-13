@@ -21,15 +21,11 @@ import (
 )
 
 // @title LaraSentry API
-// @version 1.0
-// @description API documentation for LaraSentry Go Server.
+// @version 2.0
+// @description REST API LaraSentry: приём ошибок от Laravel, жизненный цикл инцидентов, релизы из CI/CD, аналитика и поток событий.
+// @description Ключ не нужен: проект определяется по имени, а доступ ограничен ALLOWED_IPS (пусто — только хост сервиса).
 // @host localhost:8080
 // @BasePath /
-
-// @securityDefinitions.apikey Bearer
-// @in header
-// @name Authorization
-// @description Type "Bearer" followed by a space and API key.
 
 func main() {
 	_ = godotenv.Load()
@@ -55,47 +51,41 @@ func main() {
 		}
 	}
 
-	// 1. Initialize SQLite Database
 	db, err := sqlite.InitDB(dbPath)
 	if err != nil {
 		log.Fatalf("Failed to initialize DB: %v", err)
 	}
 	defer db.Close()
 
-	// 2. Setup Repositories
 	projectRepo := sqlite.NewProjectRepo(db)
 	releaseRepo := sqlite.NewReleaseRepo(db)
 	incidentRepo := sqlite.NewIncidentRepo(db, releaseRepo)
 
-	// 3. Setup Channels and UseCases
 	eventChan := make(chan domain.IncomingEvent, 1000)
 	processor := usecase.NewProcessor(incidentRepo, eventChan)
 	go processor.Start()
 
-	// 4. Setup Database Cleaner
 	go sqlite.StartCleaner(incidentRepo, 30)
 
-	// 5. Setup Telegram Alert Manager
 	alertSender := telegram.NewBotSender(tgToken, tgChatID, tgProxy)
 	alertManager := usecase.NewAlertManager(processor, alertSender, alertInterval)
 	go alertManager.Start()
 
-	// 6. Setup SSE Broker & UI Handler
 	sseBroker := sse.NewBroker()
 	uiHandler, err := deliveryHttp.NewUIHandler(projectRepo, incidentRepo, releaseRepo, sseBroker)
 	if err != nil {
 		log.Fatalf("Failed to initialize UI handler: %v", err)
 	}
 
-	// Setup GitHub API client
 	githubClient := github.NewClient(nil, "", 15*time.Minute)
 	uiHandler.SetGitHubClient(githubClient)
+	githubAccountRepo := sqlite.NewGitHubAccountRepo(db)
+	uiHandler.SetGitHubAccounts(githubAccountRepo, usecase.NewGitHubAccounts(githubAccountRepo, githubClient))
 
 	processor.SetOnIncident(func(inc domain.Incident) {
-		sseBroker.BroadcastIncident(inc, uiHandler.GetRowTemplate())
+		sseBroker.BroadcastIncident(inc)
 	})
 
-	// 7. Setup HTTP Server
 	allowedIPsStr := os.Getenv("ALLOWED_IPS")
 	var allowedIPs []string
 	if allowedIPsStr != "" {
@@ -106,7 +96,7 @@ func main() {
 			}
 		}
 	}
-	apiHandler := deliveryHttp.NewAPIHandler(projectRepo, incidentRepo, eventChan, allowedIPs)
+	apiHandler := deliveryHttp.NewAPIHandler(projectRepo, incidentRepo, eventChan)
 	apiHandler.SetReleaseRepo(releaseRepo)
 	apiHandler.SetSSEBroker(sseBroker)
 
@@ -115,46 +105,46 @@ func main() {
 	})
 
 	mux := http.NewServeMux()
+	// UI и Swagger закрываются basic auth на nginx, список IP — только для API
+	api := http.NewServeMux()
+	mux.Handle("/api/", deliveryHttp.NewIPAllowlist(allowedIPs).Middleware(api))
 
-	// 1. Ingestion routes
-	mux.HandleFunc("POST /api/events", apiHandler.HandleEvent)
-	mux.HandleFunc("POST /api/events/batch", apiHandler.HandleBatchEvents)
+	api.HandleFunc("POST /api/events", apiHandler.HandleEvent)
+	api.HandleFunc("POST /api/events/batch", apiHandler.HandleBatchEvents)
 
-	// 2. Incidents routes
-	mux.HandleFunc("GET /api/incidents", apiHandler.HandleListIncidents)
-	mux.HandleFunc("POST /api/incidents/batch", apiHandler.HandleBatchIncidents)
-	mux.HandleFunc("GET /api/incidents/{id}", apiHandler.HandleGetIncident)
-	mux.HandleFunc("DELETE /api/incidents/{id}", apiHandler.HandleDeleteIncident)
-	mux.HandleFunc("POST /api/incidents/{id}/resolve", apiHandler.HandleResolveIncident)
-	mux.HandleFunc("POST /api/incidents/{id}/reopen", apiHandler.HandleReopenIncident)
-	mux.HandleFunc("POST /api/incidents/{id}/ignore", apiHandler.HandleIgnoreIncident)
+	api.HandleFunc("GET /api/incidents", apiHandler.HandleListIncidents)
+	api.HandleFunc("POST /api/incidents/batch", apiHandler.HandleBatchIncidents)
+	api.HandleFunc("GET /api/incidents/{id}", apiHandler.HandleGetIncident)
+	api.HandleFunc("DELETE /api/incidents/{id}", apiHandler.HandleDeleteIncident)
+	api.HandleFunc("POST /api/incidents/{id}/resolve", apiHandler.HandleResolveIncident)
+	api.HandleFunc("POST /api/incidents/{id}/reopen", apiHandler.HandleReopenIncident)
+	api.HandleFunc("POST /api/incidents/{id}/ignore", apiHandler.HandleIgnoreIncident)
 
-	// 3. Projects routes
-	mux.HandleFunc("PUT /api/projects/{id}/github", apiHandler.HandleUpdateProjectGitHub)
-	mux.HandleFunc("POST /api/projects/{id}/github", apiHandler.HandleUpdateProjectGitHub)
+	api.HandleFunc("PUT /api/projects/{id}/github", apiHandler.HandleUpdateProjectGitHub)
+	api.HandleFunc("POST /api/projects/{id}/github", apiHandler.HandleUpdateProjectGitHub)
 
-	// 4. Releases routes
-	mux.HandleFunc("GET /api/releases", apiHandler.HandleListReleases)
-	mux.HandleFunc("POST /api/releases", apiHandler.HandleCreateRelease)
-	mux.HandleFunc("GET /api/releases/{version}/incidents", apiHandler.HandleReleaseIncidents)
+	api.HandleFunc("GET /api/releases", apiHandler.HandleListReleases)
+	api.HandleFunc("POST /api/releases", apiHandler.HandleCreateRelease)
+	api.HandleFunc("GET /api/releases/{version}/incidents", apiHandler.HandleReleaseIncidents)
 
-	// 5. Analytics & System
-	mux.HandleFunc("GET /api/stats/summary", apiHandler.HandleStatsSummary)
-	mux.HandleFunc("GET /api/events/stream", apiHandler.HandleEventsStreamJSON)
-	mux.HandleFunc("GET /api/health", apiHandler.HandleHealthCheck)
+	api.HandleFunc("GET /api/stats/summary", apiHandler.HandleStatsSummary)
+	api.HandleFunc("GET /api/events/stream", apiHandler.HandleEventsStreamJSON)
+	api.HandleFunc("GET /api/health", apiHandler.HandleHealthCheck)
 
-	// Swagger documentation
 	mux.HandleFunc("/swagger/", httpSwagger.WrapHandler)
 
 
-	// UI routes
 	mux.HandleFunc("/ui", uiHandler.HandleIndex)
 	mux.HandleFunc("/ui/incidents", uiHandler.HandleIncidents)
 	mux.HandleFunc("/ui/incidents/", uiHandler.HandleIncidentDetail)
 	mux.HandleFunc("POST /ui/projects/github-settings", uiHandler.HandleUpdateProjectGitHubSettings)
+	mux.HandleFunc("GET /ui/github", uiHandler.HandleGitHubPage)
+	mux.HandleFunc("POST /ui/github/accounts", uiHandler.HandleCreateGitHubAccount)
+	mux.HandleFunc("POST /ui/github/accounts/{id}/sync", uiHandler.HandleSyncGitHubAccount)
+	mux.HandleFunc("POST /ui/github/accounts/{id}/delete", uiHandler.HandleDeleteGitHubAccount)
+	mux.HandleFunc("POST /ui/github/accounts/{id}/repos", uiHandler.HandleSaveGitHubRepos)
 	mux.HandleFunc("/ui/events/stream", uiHandler.HandleEventsStream)
 
-	// Root redirect
 	mux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path == "/" {
 			http.Redirect(w, r, "/ui", http.StatusSeeOther)
@@ -163,8 +153,13 @@ func main() {
 		http.NotFound(w, r)
 	})
 	
-	log.Printf("Larasentry server is running on :%s (UI at http://localhost:%s/ui)...", port, port)
-	if err := http.ListenAndServe(":"+port, mux); err != nil {
+	// На проде 127.0.0.1:8080: иначе соседи по внутренней сети откроют UI в обход basic auth nginx
+	listenAddr := os.Getenv("LISTEN_ADDR")
+	if listenAddr == "" {
+		listenAddr = ":" + port
+	}
+	log.Printf("Larasentry server is listening on %s (UI at /ui)", listenAddr)
+	if err := http.ListenAndServe(listenAddr, mux); err != nil {
 		log.Fatalf("Server failed: %v", err)
 	}
 }

@@ -33,6 +33,9 @@ func (r *IncidentRepo) UpsertIncident(ctx context.Context, event domain.Incoming
 		incomingEnv = "production"
 	}
 	incomingPHPVer := strings.TrimSpace(event.Payload.PHPVersion)
+	if incomingPHPVer == "" && event.Payload.System != nil && event.Payload.System.PHPVersion != "" {
+		incomingPHPVer = strings.TrimSpace(event.Payload.System.PHPVersion)
+	}
 	if incomingPHPVer == "" && event.Payload.Tags != nil {
 		if v, ok := event.Payload.Tags["php_version"]; ok {
 			incomingPHPVer = strings.TrimSpace(v)
@@ -40,13 +43,81 @@ func (r *IncidentRepo) UpsertIncident(ctx context.Context, event domain.Incoming
 			incomingPHPVer = strings.TrimSpace(v)
 		}
 	}
+	incomingLaravelVer := strings.TrimSpace(event.Payload.LaravelVersion)
+	if incomingLaravelVer == "" && event.Payload.System != nil && event.Payload.System.LaravelVersion != "" {
+		incomingLaravelVer = strings.TrimSpace(event.Payload.System.LaravelVersion)
+	}
+	if incomingLaravelVer == "" && event.Payload.Tags != nil {
+		if v, ok := event.Payload.Tags["laravel_version"]; ok {
+			incomingLaravelVer = strings.TrimSpace(v)
+		} else if v, ok := event.Payload.Tags["laravel"]; ok {
+			incomingLaravelVer = strings.TrimSpace(v)
+		}
+	}
 
-	// 1. Auto-register release if provided
+	var routeName, routeAction string
+	if event.Payload.Route != nil {
+		routeName = strings.TrimSpace(event.Payload.Route.Name)
+		routeAction = strings.TrimSpace(event.Payload.Route.Action)
+	}
+
+	executionType := "http"
+	if event.Payload.Execution != nil && event.Payload.Execution.Type != "" {
+		executionType = strings.TrimSpace(event.Payload.Execution.Type)
+	} else if event.Payload.Execution != nil && event.Payload.Execution.QueueJob != nil {
+		executionType = "queue"
+	}
+
+	var requestContextJSON sql.NullString
+	if event.Payload.Route != nil || event.Payload.HTTPRequest != nil {
+		reqData := domain.RequestContextData{
+			Route:       event.Payload.Route,
+			HTTPRequest: event.Payload.HTTPRequest,
+		}
+		if b, err := json.Marshal(reqData); err == nil {
+			requestContextJSON = sql.NullString{String: string(b), Valid: true}
+		}
+	}
+
+	var queueContextJSON sql.NullString
+	if event.Payload.Execution != nil && event.Payload.Execution.QueueJob != nil {
+		if b, err := json.Marshal(event.Payload.Execution.QueueJob); err == nil {
+			queueContextJSON = sql.NullString{String: string(b), Valid: true}
+		}
+	}
+
+	var systemContextJSON sql.NullString
+	if event.Payload.System != nil {
+		if event.Payload.System.PHPVersion == "" && incomingPHPVer != "" {
+			event.Payload.System.PHPVersion = incomingPHPVer
+		}
+		if event.Payload.System.LaravelVersion == "" && incomingLaravelVer != "" {
+			event.Payload.System.LaravelVersion = incomingLaravelVer
+		}
+		if b, err := json.Marshal(event.Payload.System); err == nil {
+			systemContextJSON = sql.NullString{String: string(b), Valid: true}
+		}
+	}
+
+	var breadcrumbsJSON sql.NullString
+	if len(event.Payload.Breadcrumbs) > 0 {
+		if b, err := json.Marshal(event.Payload.Breadcrumbs); err == nil {
+			breadcrumbsJSON = sql.NullString{String: string(b), Valid: true}
+		}
+	}
+
+	var appContextJSON sql.NullString
+	if c := event.Payload.Context; c != nil && (len(c.Shared) > 0 || len(c.Exception) > 0) {
+		if b, err := json.Marshal(c); err == nil {
+			appContextJSON = sql.NullString{String: string(b), Valid: true}
+		}
+	}
+
+	// Релиз из события регистрируется автоматически
 	if incomingRel != "" && r.releaseRepo != nil {
 		_, _ = r.releaseRepo.UpsertRelease(ctx, event.ProjectID, incomingRel)
 	}
 
-	// 2. Check if incident already exists
 	var existing struct {
 		id                int64
 		eventsCount       int
@@ -74,15 +145,16 @@ func (r *IncidentRepo) UpsertIncident(ctx context.Context, event domain.Incoming
 		}
 	}
 
-	// Case A: New incident
 	if err == sql.ErrNoRows {
 		insertQuery := `
 		INSERT INTO incidents (
 			project_id, hash, exception_class, message, file, line, 
 			stack_trace, app_url, request_url, events_count, first_seen_at, last_seen_at,
 			environment, first_release, last_release, status, is_regression, code_snippet,
-			php_version
-		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 1, ?, ?, ?, ?, ?, 'unresolved', 0, ?, ?)
+			php_version, laravel_version,
+			route_name, route_action, execution_type,
+			request_context, queue_context, system_context, breadcrumbs, app_context
+		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 1, ?, ?, ?, ?, ?, 'unresolved', 0, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 		RETURNING id;
 		`
 		var newID int64
@@ -90,7 +162,9 @@ func (r *IncidentRepo) UpsertIncident(ctx context.Context, event domain.Incoming
 			event.ProjectID, hash, event.Payload.ExceptionClass, event.Payload.Message,
 			event.Payload.File, event.Payload.Line, event.Payload.StackTrace,
 			event.Payload.AppURL, event.Payload.RequestURL, now, now,
-			incomingEnv, incomingRel, incomingRel, snippetJSON, incomingPHPVer,
+			incomingEnv, incomingRel, incomingRel, snippetJSON, incomingPHPVer, incomingLaravelVer,
+			routeName, routeAction, executionType,
+			requestContextJSON, queueContextJSON, systemContextJSON, breadcrumbsJSON, appContextJSON,
 		).Scan(&newID)
 		if err != nil {
 			return nil, err
@@ -114,25 +188,24 @@ func (r *IncidentRepo) UpsertIncident(ctx context.Context, event domain.Incoming
 		return nil, err
 	}
 
-	// Case B: Incident already exists
-	// Check if this is an already resolved issue
+	// Уже решённый инцидент: решаем, регрессия это или событие из старого релиза
 	if existing.status == domain.StatusResolved {
 		isRegression := false
 		resolvedIn := existing.resolvedInRelease
 
 		if resolvedIn == "" || resolvedIn == "immediate" {
-			// Immediate resolve re-opens on any new occurrence
+			// Решённый с типом immediate переоткрывается при любом новом событии
 			isRegression = true
 		} else if resolvedIn == "next" {
-			// Resolved in next release: check if incoming release is different from the release at resolution time
+			// Решённый в next: регрессия, если релиз события отличается от релиза на момент решения
 			if incomingRel != "" && incomingRel != existing.lastRelease {
 				isRegression = true
 			}
 		} else {
-			// Resolved in specific version (e.g. "1.2.0")
+			// Решённый в конкретной версии (например, "1.2.0")
 			if incomingRel != "" {
 				cmp := version.Compare(incomingRel, resolvedIn, func(v1, v2 string) int {
-					// Fallback: compare chronological created_at in releases table
+					// Если версии не SemVer, сравниваем по created_at в таблице releases
 					if r.releaseRepo == nil {
 						return strings.Compare(v1, v2)
 					}
@@ -149,14 +222,14 @@ func (r *IncidentRepo) UpsertIncident(ctx context.Context, event domain.Incoming
 					return strings.Compare(v1, v2)
 				})
 				if cmp >= 0 {
-					// Event is from resolved release or newer -> Regression!
+					// Событие из релиза решения или новее — регрессия
 					isRegression = true
 				}
 			}
 		}
 
 		if isRegression {
-			// Re-open incident and mark as regression
+			// Переоткрываем инцидент и помечаем как регрессию
 			updateQuery := `
 			UPDATE incidents SET
 				events_count = events_count + 1,
@@ -166,10 +239,34 @@ func (r *IncidentRepo) UpsertIncident(ctx context.Context, event domain.Incoming
 				status = 'unresolved',
 				is_regression = 1,
 				code_snippet = CASE WHEN ? IS NOT NULL THEN ? ELSE code_snippet END,
-				php_version = CASE WHEN ? != '' THEN ? ELSE php_version END
+				php_version = CASE WHEN ? != '' THEN ? ELSE php_version END,
+				laravel_version = CASE WHEN ? != '' THEN ? ELSE laravel_version END,
+				route_name = CASE WHEN ? != '' THEN ? ELSE route_name END,
+				route_action = CASE WHEN ? != '' THEN ? ELSE route_action END,
+				execution_type = CASE WHEN ? != '' THEN ? ELSE execution_type END,
+				request_context = CASE WHEN ? IS NOT NULL THEN ? ELSE request_context END,
+				queue_context = CASE WHEN ? IS NOT NULL THEN ? ELSE queue_context END,
+				system_context = CASE WHEN ? IS NOT NULL THEN ? ELSE system_context END,
+				breadcrumbs = CASE WHEN ? IS NOT NULL THEN ? ELSE breadcrumbs END,
+				app_context = CASE WHEN ? IS NOT NULL THEN ? ELSE app_context END
 			WHERE id = ?;
 			`
-			_, err = r.db.ExecContext(ctx, updateQuery, now, event.Payload.Message, incomingRel, incomingRel, snippetJSON, snippetJSON, incomingPHPVer, incomingPHPVer, existing.id)
+			_, err = r.db.ExecContext(ctx, updateQuery,
+				now, event.Payload.Message,
+				incomingRel, incomingRel,
+				snippetJSON, snippetJSON,
+				incomingPHPVer, incomingPHPVer,
+				incomingLaravelVer, incomingLaravelVer,
+				routeName, routeName,
+				routeAction, routeAction,
+				executionType, executionType,
+				requestContextJSON, requestContextJSON,
+				queueContextJSON, queueContextJSON,
+				systemContextJSON, systemContextJSON,
+				breadcrumbsJSON, breadcrumbsJSON,
+				appContextJSON, appContextJSON,
+				existing.id,
+			)
 			if err != nil {
 				return nil, err
 			}
@@ -190,15 +287,23 @@ func (r *IncidentRepo) UpsertIncident(ctx context.Context, event domain.Incoming
 			}, nil
 		}
 
-		// Event from an older release: update counters quietly, keep status resolved
+		// Событие из более старого релиза: тихо обновляем счётчики, статус остаётся resolved
 		quietQuery := `
 		UPDATE incidents SET
 			events_count = events_count + 1,
 			last_seen_at = ?,
-			php_version = CASE WHEN ? != '' THEN ? ELSE php_version END
+			php_version = CASE WHEN ? != '' THEN ? ELSE php_version END,
+			laravel_version = CASE WHEN ? != '' THEN ? ELSE laravel_version END,
+			system_context = CASE WHEN ? IS NOT NULL THEN ? ELSE system_context END
 		WHERE id = ?;
 		`
-		_, err = r.db.ExecContext(ctx, quietQuery, now, incomingPHPVer, incomingPHPVer, existing.id)
+		_, err = r.db.ExecContext(ctx, quietQuery,
+			now,
+			incomingPHPVer, incomingPHPVer,
+			incomingLaravelVer, incomingLaravelVer,
+			systemContextJSON, systemContextJSON,
+			existing.id,
+		)
 		if err != nil {
 			return nil, err
 		}
@@ -215,11 +320,11 @@ func (r *IncidentRepo) UpsertIncident(ctx context.Context, event domain.Incoming
 			IsRegression: false,
 			IsNew:        false,
 			Incident:     incidentObj,
-			Ignored:      true, // Ignored for alerts and active list
+			Ignored:      true, // не попадает в алерты и список активных
 		}, nil
 	}
 
-	// Normal active incident update (unresolved or ignored)
+	// Обычное обновление активного инцидента (unresolved или ignored)
 	updateQuery := `
 	UPDATE incidents SET
 		events_count = events_count + 1,
@@ -227,10 +332,34 @@ func (r *IncidentRepo) UpsertIncident(ctx context.Context, event domain.Incoming
 		message = ?,
 		last_release = CASE WHEN ? != '' THEN ? ELSE last_release END,
 		code_snippet = CASE WHEN ? IS NOT NULL THEN ? ELSE code_snippet END,
-		php_version = CASE WHEN ? != '' THEN ? ELSE php_version END
+		php_version = CASE WHEN ? != '' THEN ? ELSE php_version END,
+		laravel_version = CASE WHEN ? != '' THEN ? ELSE laravel_version END,
+		route_name = CASE WHEN ? != '' THEN ? ELSE route_name END,
+		route_action = CASE WHEN ? != '' THEN ? ELSE route_action END,
+		execution_type = CASE WHEN ? != '' THEN ? ELSE execution_type END,
+		request_context = CASE WHEN ? IS NOT NULL THEN ? ELSE request_context END,
+		queue_context = CASE WHEN ? IS NOT NULL THEN ? ELSE queue_context END,
+		system_context = CASE WHEN ? IS NOT NULL THEN ? ELSE system_context END,
+		breadcrumbs = CASE WHEN ? IS NOT NULL THEN ? ELSE breadcrumbs END,
+		app_context = CASE WHEN ? IS NOT NULL THEN ? ELSE app_context END
 	WHERE id = ?;
 	`
-	_, err = r.db.ExecContext(ctx, updateQuery, now, event.Payload.Message, incomingRel, incomingRel, snippetJSON, snippetJSON, incomingPHPVer, incomingPHPVer, existing.id)
+	_, err = r.db.ExecContext(ctx, updateQuery,
+		now, event.Payload.Message,
+		incomingRel, incomingRel,
+		snippetJSON, snippetJSON,
+		incomingPHPVer, incomingPHPVer,
+		incomingLaravelVer, incomingLaravelVer,
+		routeName, routeName,
+		routeAction, routeAction,
+		executionType, executionType,
+		requestContextJSON, requestContextJSON,
+		queueContextJSON, queueContextJSON,
+		systemContextJSON, systemContextJSON,
+		breadcrumbsJSON, breadcrumbsJSON,
+		appContextJSON, appContextJSON,
+		existing.id,
+	)
 	if err != nil {
 		return nil, err
 	}
@@ -263,7 +392,7 @@ func (r *IncidentRepo) ResolveIncident(ctx context.Context, id int64, resolution
 	} else if resolutionType == "next" {
 		resolvedIn = "next"
 	} else if resolutionType == "current" && resolvedIn == "" {
-		// Look up latest release of project
+		// Берём последний релиз проекта
 		var projectID int64
 		_ = r.db.QueryRowContext(ctx, "SELECT project_id FROM incidents WHERE id = ?", id).Scan(&projectID)
 		if r.releaseRepo != nil && projectID > 0 {
@@ -286,6 +415,20 @@ func (r *IncidentRepo) ResolveIncident(ctx context.Context, id int64, resolution
 	WHERE id = ?;
 	`
 	_, err := r.db.ExecContext(ctx, query, resolvedIn, now, id)
+	return err
+}
+
+// RestoreIncidentState записывает обратно состояние, снятое до действия в UI.
+// Resolve и Reopen сбрасывают is_regression и поля решения, поэтому отмена идёт отдельным путём.
+func (r *IncidentRepo) RestoreIncidentState(ctx context.Context, id int64, state domain.IncidentState) error {
+	_, err := r.db.ExecContext(ctx, `
+	UPDATE incidents SET
+		status = ?,
+		is_regression = ?,
+		resolved_in_release = NULLIF(?, ''),
+		resolved_at = ?
+	WHERE id = ?;
+	`, state.Status, state.IsRegression, state.ResolvedInRelease, state.ResolvedAt, id)
 	return err
 }
 
@@ -344,9 +487,9 @@ func buildIncidentWhere(filter domain.IncidentFilter) (string, []interface{}) {
 	}
 
 	if filter.Query != "" {
-		where += " AND (i.message LIKE ? OR i.exception_class LIKE ? OR i.file LIKE ? OR i.request_url LIKE ? OR p.name LIKE ? OR i.last_release LIKE ?)"
-		pattern := "%" + filter.Query + "%"
-		args = append(args, pattern, pattern, pattern, pattern, pattern, pattern)
+		where += " AND (unicode_lower(i.message) LIKE ? OR unicode_lower(i.exception_class) LIKE ? OR unicode_lower(i.file) LIKE ? OR unicode_lower(i.request_url) LIKE ? OR unicode_lower(p.name) LIKE ? OR unicode_lower(i.last_release) LIKE ? OR unicode_lower(i.route_name) LIKE ?)"
+		pattern := "%" + strings.ToLower(filter.Query) + "%"
+		args = append(args, pattern, pattern, pattern, pattern, pattern, pattern, pattern)
 	}
 
 	return where, args
@@ -360,7 +503,8 @@ func (r *IncidentRepo) GetIncidents(ctx context.Context, filter domain.IncidentF
 			i.events_count, i.first_seen_at, i.last_seen_at,
 			i.environment, COALESCE(i.first_release, ''), COALESCE(i.last_release, ''),
 			i.status, COALESCE(i.resolved_in_release, ''), i.resolved_at, i.is_regression,
-			COALESCE(i.php_version, '')
+			COALESCE(i.php_version, ''), COALESCE(i.laravel_version, ''),
+			COALESCE(i.route_name, ''), COALESCE(i.route_action, ''), COALESCE(i.execution_type, 'http')
 		FROM incidents i
 		LEFT JOIN projects p ON i.project_id = p.id
 	`
@@ -405,7 +549,8 @@ func (r *IncidentRepo) GetIncidents(ctx context.Context, filter domain.IncidentF
 			&inc.EventsCount, &inc.FirstSeenAt, &inc.LastSeenAt,
 			&inc.Environment, &inc.FirstRelease, &inc.LastRelease,
 			&inc.Status, &inc.ResolvedInRelease, &resolvedAt, &isRegrInt,
-			&inc.PHPVersion,
+			&inc.PHPVersion, &inc.LaravelVersion,
+			&inc.RouteName, &inc.RouteAction, &inc.ExecutionType,
 		); err != nil {
 			log.Printf("Error scanning row: %v", err)
 			continue
@@ -442,7 +587,16 @@ func (r *IncidentRepo) GetIncidentByID(ctx context.Context, id int64) (*domain.I
 			i.environment, COALESCE(i.first_release, ''), COALESCE(i.last_release, ''),
 			i.status, COALESCE(i.resolved_in_release, ''), i.resolved_at, i.is_regression,
 			COALESCE(i.code_snippet, ''),
-			COALESCE(i.php_version, '')
+			COALESCE(i.php_version, ''),
+			COALESCE(i.laravel_version, ''),
+			COALESCE(i.route_name, ''),
+			COALESCE(i.route_action, ''),
+			COALESCE(i.execution_type, 'http'),
+			COALESCE(i.request_context, ''),
+			COALESCE(i.queue_context, ''),
+			COALESCE(i.system_context, ''),
+			COALESCE(i.breadcrumbs, ''),
+			COALESCE(i.app_context, '')
 		FROM incidents i
 		LEFT JOIN projects p ON i.project_id = p.id
 		WHERE i.id = ?`, id)
@@ -451,6 +605,7 @@ func (r *IncidentRepo) GetIncidentByID(ctx context.Context, id int64) (*domain.I
 	var resolvedAt sql.NullTime
 	var isRegrInt int
 	var snippetRaw string
+	var reqContextRaw, queueContextRaw, systemContextRaw, breadcrumbsRaw, appContextRaw string
 	err := row.Scan(
 		&inc.ID, &inc.ProjectID, &inc.ProjectName, &inc.Hash, &inc.ExceptionClass, &inc.Message,
 		&inc.File, &inc.Line, &inc.StackTrace, &inc.AppURL, &inc.RequestURL,
@@ -459,6 +614,15 @@ func (r *IncidentRepo) GetIncidentByID(ctx context.Context, id int64) (*domain.I
 		&inc.Status, &inc.ResolvedInRelease, &resolvedAt, &isRegrInt,
 		&snippetRaw,
 		&inc.PHPVersion,
+		&inc.LaravelVersion,
+		&inc.RouteName,
+		&inc.RouteAction,
+		&inc.ExecutionType,
+		&reqContextRaw,
+		&queueContextRaw,
+		&systemContextRaw,
+		&breadcrumbsRaw,
+		&appContextRaw,
 	)
 	if err != nil {
 		return nil, err
@@ -473,6 +637,54 @@ func (r *IncidentRepo) GetIncidentByID(ctx context.Context, id int64) (*domain.I
 			inc.CodeSnippet = &snippet
 		}
 	}
+
+	if reqContextRaw != "" {
+		var reqData domain.RequestContextData
+		if err := json.Unmarshal([]byte(reqContextRaw), &reqData); err == nil {
+			inc.Route = reqData.Route
+			inc.HTTPRequest = reqData.HTTPRequest
+		}
+	}
+	if inc.Route == nil && (inc.RouteName != "" || inc.RouteAction != "") {
+		inc.Route = &domain.RouteContext{
+			Name:   inc.RouteName,
+			Action: inc.RouteAction,
+		}
+	}
+
+	if queueContextRaw != "" {
+		var queueJob domain.QueueJobContext
+		if err := json.Unmarshal([]byte(queueContextRaw), &queueJob); err == nil {
+			inc.QueueJob = &queueJob
+		}
+	}
+
+	inc.Execution = &domain.ExecutionContext{
+		Type:     inc.ExecutionType,
+		IsCLI:    inc.ExecutionType == "console" || inc.ExecutionType == "queue",
+		QueueJob: inc.QueueJob,
+	}
+
+	if systemContextRaw != "" {
+		var sys domain.SystemContext
+		if err := json.Unmarshal([]byte(systemContextRaw), &sys); err == nil {
+			inc.System = &sys
+		}
+	}
+
+	if breadcrumbsRaw != "" {
+		var bcs []domain.Breadcrumb
+		if err := json.Unmarshal([]byte(breadcrumbsRaw), &bcs); err == nil {
+			inc.Breadcrumbs = bcs
+		}
+	}
+	if appContextRaw != "" {
+		var appCtx domain.AppContext
+		if err := json.Unmarshal([]byte(appContextRaw), &appCtx); err == nil {
+			inc.AppContext = &appCtx
+		}
+	}
+
 	return &inc, nil
 }
 
@@ -493,6 +705,24 @@ func (r *IncidentRepo) CountIncidents(ctx context.Context, projectID int64, stat
 	var count int
 	err := r.db.QueryRowContext(ctx, query, args...).Scan(&count)
 	return count, err
+}
+
+func (r *IncidentRepo) CountByProject(ctx context.Context) (map[int64]int, error) {
+	rows, err := r.db.QueryContext(ctx, "SELECT project_id, COUNT(*) FROM incidents GROUP BY project_id")
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	counts := map[int64]int{}
+	for rows.Next() {
+		var projectID int64
+		var count int
+		if err := rows.Scan(&projectID, &count); err != nil {
+			return nil, err
+		}
+		counts[projectID] = count
+	}
+	return counts, rows.Err()
 }
 
 func (r *IncidentRepo) CleanOldIncidents(ctx context.Context, daysToKeep int) (int64, error) {

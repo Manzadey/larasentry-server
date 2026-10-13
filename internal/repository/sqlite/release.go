@@ -60,6 +60,28 @@ func (r *ReleaseRepo) CreateRelease(ctx context.Context, projectID int64, versio
 	return r.GetRelease(ctx, projectID, version)
 }
 
+func (r *ReleaseRepo) LatestVersions(ctx context.Context) (map[int64]string, error) {
+	rows, err := r.db.QueryContext(ctx, `
+	SELECT project_id, version FROM (
+		SELECT project_id, version, ROW_NUMBER() OVER (PARTITION BY project_id ORDER BY created_at DESC) AS rn
+		FROM releases
+	) WHERE rn = 1`)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	versions := map[int64]string{}
+	for rows.Next() {
+		var projectID int64
+		var version string
+		if err := rows.Scan(&projectID, &version); err != nil {
+			return nil, err
+		}
+		versions[projectID] = version
+	}
+	return versions, rows.Err()
+}
+
 func (r *ReleaseRepo) GetLatestRelease(ctx context.Context, projectID int64) (*domain.Release, error) {
 	query := `
 	SELECT id, project_id, version, COALESCE(ref, ''), COALESCE(commit_sha, ''), created_at
@@ -146,7 +168,7 @@ func (r *ReleaseRepo) GetIncidentsByRelease(ctx context.Context, projectID int64
 			i.events_count, i.first_seen_at, i.last_seen_at,
 			i.environment, COALESCE(i.first_release, ''), COALESCE(i.last_release, ''),
 			i.status, COALESCE(i.resolved_in_release, ''), i.resolved_at, i.is_regression,
-			COALESCE(i.php_version, '')
+			COALESCE(i.php_version, ''), COALESCE(i.laravel_version, '')
 		FROM incidents i
 		LEFT JOIN projects p ON i.project_id = p.id
 		WHERE i.project_id = ?
@@ -180,7 +202,7 @@ func (r *ReleaseRepo) GetIncidentsByRelease(ctx context.Context, projectID int64
 			&inc.EventsCount, &inc.FirstSeenAt, &inc.LastSeenAt,
 			&inc.Environment, &inc.FirstRelease, &inc.LastRelease,
 			&inc.Status, &inc.ResolvedInRelease, &resolvedAt, &isRegrInt,
-			&inc.PHPVersion,
+			&inc.PHPVersion, &inc.LaravelVersion,
 		); err != nil {
 			continue
 		}

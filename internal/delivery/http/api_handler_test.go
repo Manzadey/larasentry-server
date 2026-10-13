@@ -2,7 +2,9 @@ package http
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"testing"
@@ -38,7 +40,7 @@ func setupTestAPIHandler(t *testing.T) (*APIHandler, chan domain.IncomingEvent, 
 	incidentRepo := &mockIncidentRepo{incident: mockInc}
 	releaseRepo := &mockReleaseRepo{}
 
-	handler := NewAPIHandler(projectRepo, incidentRepo, eventChan, nil)
+	handler := NewAPIHandler(projectRepo, incidentRepo, eventChan)
 	handler.SetReleaseRepo(releaseRepo)
 	handler.SetSSEBroker(broker)
 
@@ -97,8 +99,8 @@ func TestHandleEvent_Success(t *testing.T) {
 	}
 }
 
-func TestHandleEvent_Unauthorized(t *testing.T) {
-	handler, _, _ := setupTestAPIHandler(t)
+func TestHandleEvent_NoToken_AutoResolvesDefaultProject(t *testing.T) {
+	handler, eventChan, _ := setupTestAPIHandler(t)
 
 	payload := domain.EventPayload{
 		ExceptionClass: "RuntimeException",
@@ -106,31 +108,75 @@ func TestHandleEvent_Unauthorized(t *testing.T) {
 	}
 	body, _ := json.Marshal(payload)
 
-	// Missing header
+	// Без заголовка и токена запрос проходит, проект определяется автоматически
 	req := httptest.NewRequest(http.MethodPost, "/api/events", bytes.NewReader(body))
 	rec := httptest.NewRecorder()
 	handler.HandleEvent(rec, req)
-	if rec.Code != http.StatusUnauthorized {
-		t.Errorf("expected 401 Unauthorized for missing token, got %d", rec.Code)
+	if rec.Code != http.StatusAccepted {
+		t.Errorf("expected 202 Accepted for missing token, got %d: %s", rec.Code, rec.Body.String())
+	}
+
+	select {
+	case event := <-eventChan:
+		if event.ProjectName != "Default Project" {
+			t.Errorf("expected Default Project, got %s", event.ProjectName)
+		}
+	default:
+		t.Errorf("expected event in eventChan")
 	}
 }
 
-func TestHandleEvent_ForbiddenIP(t *testing.T) {
-	mockInc := &domain.Incident{ID: 1}
-	eventChan := make(chan domain.IncomingEvent, 10)
-	handler := NewAPIHandler(&mockProjectRepo{}, &mockIncidentRepo{incident: mockInc}, eventChan, []string{"192.168.1.100"})
+func TestHandleEvent_WithProjectNameInPayload(t *testing.T) {
+	handler, eventChan, _ := setupTestAPIHandler(t)
 
-	payload := domain.EventPayload{ExceptionClass: "Error", Message: "Msg"}
+	payload := domain.EventPayload{
+		Project:        "shop-backend",
+		ExceptionClass: "QueryException",
+		Message:        "Table not found",
+	}
 	body, _ := json.Marshal(payload)
 
 	req := httptest.NewRequest(http.MethodPost, "/api/events", bytes.NewReader(body))
-	req.Header.Set("Authorization", "Bearer test-key")
-	req.RemoteAddr = "10.0.0.1:12345"
 	rec := httptest.NewRecorder()
-
 	handler.HandleEvent(rec, req)
-	if rec.Code != http.StatusForbidden {
-		t.Errorf("expected 403 Forbidden for non-whitelisted IP, got %d", rec.Code)
+	if rec.Code != http.StatusAccepted {
+		t.Errorf("expected 202 Accepted, got %d: %s", rec.Code, rec.Body.String())
+	}
+
+	select {
+	case event := <-eventChan:
+		if event.ProjectName != "shop-backend" {
+			t.Errorf("expected shop-backend, got %s", event.ProjectName)
+		}
+	default:
+		t.Errorf("expected event in eventChan")
+	}
+}
+
+func TestHandleEvent_WithProjectNameInHeader(t *testing.T) {
+	handler, eventChan, _ := setupTestAPIHandler(t)
+
+	payload := domain.EventPayload{
+		ExceptionClass: "LogicException",
+		Message:        "Bad state",
+	}
+	body, _ := json.Marshal(payload)
+
+	req := httptest.NewRequest(http.MethodPost, "/api/events", bytes.NewReader(body))
+	req.Header.Set("X-Project", "crm-system")
+	rec := httptest.NewRecorder()
+	handler.HandleEvent(rec, req)
+	if rec.Code != http.StatusAccepted {
+		t.Errorf("expected 202 Accepted, got %d: %s", rec.Code, rec.Body.String())
+	}
+
+	select {
+	case event := <-eventChan:
+		if event.ProjectName != "crm-system" {
+			t.Errorf("expected crm-system, got %s", event.ProjectName)
+		}
+	default:
+		t.Errorf("expected event in eventChan")
 	}
 }
 
@@ -194,7 +240,6 @@ func TestHandleListIncidents(t *testing.T) {
 func TestHandleGetIncident(t *testing.T) {
 	handler, _, _ := setupTestAPIHandler(t)
 
-	// Create test request with PathValue
 	req := httptest.NewRequest(http.MethodGet, "/api/incidents/42", nil)
 	req.SetPathValue("id", "42")
 	req.Header.Set("Authorization", "Bearer test-key")
@@ -222,7 +267,6 @@ func TestHandleGetIncident(t *testing.T) {
 func TestHandleIncidentLifecycle(t *testing.T) {
 	handler, _, _ := setupTestAPIHandler(t)
 
-	// 1. Resolve
 	resolveBody, _ := json.Marshal(domain.ResolveRequest{Type: "next"})
 	req := httptest.NewRequest(http.MethodPost, "/api/incidents/42/resolve", bytes.NewReader(resolveBody))
 	req.SetPathValue("id", "42")
@@ -233,7 +277,6 @@ func TestHandleIncidentLifecycle(t *testing.T) {
 		t.Fatalf("resolve failed with %d: %s", rec.Code, rec.Body.String())
 	}
 
-	// 2. Reopen
 	req = httptest.NewRequest(http.MethodPost, "/api/incidents/42/reopen", nil)
 	req.SetPathValue("id", "42")
 	req.Header.Set("Authorization", "Bearer test-key")
@@ -243,7 +286,6 @@ func TestHandleIncidentLifecycle(t *testing.T) {
 		t.Fatalf("reopen failed with %d: %s", rec.Code, rec.Body.String())
 	}
 
-	// 3. Ignore
 	ignoreBody, _ := json.Marshal(map[string]bool{"ignored": true})
 	req = httptest.NewRequest(http.MethodPost, "/api/incidents/42/ignore", bytes.NewReader(ignoreBody))
 	req.SetPathValue("id", "42")
@@ -254,7 +296,6 @@ func TestHandleIncidentLifecycle(t *testing.T) {
 		t.Fatalf("ignore failed with %d: %s", rec.Code, rec.Body.String())
 	}
 
-	// 4. Delete
 	req = httptest.NewRequest(http.MethodDelete, "/api/incidents/42", nil)
 	req.SetPathValue("id", "42")
 	req.Header.Set("Authorization", "Bearer test-key")
@@ -292,7 +333,6 @@ func TestHandleBatchIncidents(t *testing.T) {
 func TestHandleReleases(t *testing.T) {
 	handler, _, _ := setupTestAPIHandler(t)
 
-	// 1. Create release
 	createBody, _ := json.Marshal(domain.CreateReleaseRequest{
 		Version: "v1.5.0",
 		Ref:     "refs/heads/main",
@@ -306,7 +346,6 @@ func TestHandleReleases(t *testing.T) {
 		t.Fatalf("create release failed with %d: %s", rec.Code, rec.Body.String())
 	}
 
-	// 2. List releases
 	req = httptest.NewRequest(http.MethodGet, "/api/releases", nil)
 	req.Header.Set("Authorization", "Bearer test-key")
 	rec = httptest.NewRecorder()
@@ -315,7 +354,6 @@ func TestHandleReleases(t *testing.T) {
 		t.Fatalf("list releases failed with %d: %s", rec.Code, rec.Body.String())
 	}
 
-	// 3. Release incidents
 	req = httptest.NewRequest(http.MethodGet, "/api/releases/v1.5.0/incidents", nil)
 	req.SetPathValue("version", "v1.5.0")
 	req.Header.Set("Authorization", "Bearer test-key")
@@ -368,11 +406,10 @@ func TestHandleHealthCheck(t *testing.T) {
 func TestHandleUpdateProjectGitHub(t *testing.T) {
 	handler, _, _ := setupTestAPIHandler(t)
 
-	body := map[string]string{
-		"github_repo":   "Manzadey/larasentry-server",
-		"github_token":  "ghp_testtoken123",
-		"github_branch": "main",
-		"path_prefix":   "/var/www/html",
+	body := map[string]any{
+		"github_repo_id": 7,
+		"github_branch":  "main",
+		"path_prefix":    "/var/www/html",
 	}
 	bodyBytes, _ := json.Marshal(body)
 
@@ -394,5 +431,86 @@ func TestHandleUpdateProjectGitHub(t *testing.T) {
 	}
 	if res["status"] != "ok" {
 		t.Errorf("expected status 'ok', got %v", res["status"])
+	}
+}
+
+func TestHandleUpdateProjectGitHub_RejectsLegacyBody(t *testing.T) {
+	handler, _, _ := setupTestAPIHandler(t)
+
+	body := `{"github_repo":"org/app","github_token":"ghp_x","github_branch":"main"}`
+	req := httptest.NewRequest(http.MethodPut, "/api/projects/1/github", bytes.NewReader([]byte(body)))
+	req.Header.Set("Content-Type", "application/json")
+	req.SetPathValue("id", "1")
+	rec := httptest.NewRecorder()
+
+	handler.HandleUpdateProjectGitHub(rec, req)
+
+	if rec.Code != http.StatusBadRequest {
+		t.Fatalf("legacy body without github_repo_id must be rejected, got %d: %s", rec.Code, rec.Body.String())
+	}
+}
+
+func TestHandleUpdateProjectGitHub_RejectsUnselectedRepo(t *testing.T) {
+	handler, _, _ := setupTestAPIHandler(t)
+
+	req := httptest.NewRequest(http.MethodPut, "/api/projects/1/github", bytes.NewReader([]byte(`{"github_repo_id":999}`)))
+	req.Header.Set("Content-Type", "application/json")
+	req.SetPathValue("id", "1")
+	rec := httptest.NewRecorder()
+
+	handler.HandleUpdateProjectGitHub(rec, req)
+
+	if rec.Code != http.StatusBadRequest {
+		t.Fatalf("expected 400, got %d: %s", rec.Code, rec.Body.String())
+	}
+}
+
+func TestHandleEvent_DecodesAppContext(t *testing.T) {
+	handler, eventChan, _ := setupTestAPIHandler(t)
+
+	body := []byte(`{"exception_class":"RuntimeException","message":"m","file":"f.php","line":1,` +
+		`"release":"1.0.0","environment":"production",` +
+		`"context":{"shared":{"trace_id":"t-1"},"exception":{"order_id":42}}}`)
+
+	req := httptest.NewRequest(http.MethodPost, "/api/events", bytes.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	rec := httptest.NewRecorder()
+
+	handler.HandleEvent(rec, req)
+
+	if rec.Code != http.StatusAccepted {
+		t.Fatalf("expected 202 Accepted, got %d: %s", rec.Code, rec.Body.String())
+	}
+
+	select {
+	case event := <-eventChan:
+		c := event.Payload.Context
+		if c == nil || c.Shared["trace_id"] != "t-1" || c.Exception["order_id"] != float64(42) {
+			t.Errorf("unexpected decoded context: %+v", c)
+		}
+	default:
+		t.Fatal("expected event to be dispatched into eventChan")
+	}
+}
+
+type failingProjectRepo struct{ mockProjectRepo }
+
+func (*failingProjectRepo) GetOrCreateByName(ctx context.Context, name string) (*domain.Project, error) {
+	return nil, errors.New("database is locked")
+}
+
+func TestReportsFailCleanlyWhenProjectUnresolved(t *testing.T) {
+	handler := NewAPIHandler(&failingProjectRepo{}, &mockIncidentRepo{}, nil)
+	handler.SetReleaseRepo(&mockReleaseRepo{})
+	mux := http.NewServeMux()
+	mux.HandleFunc("GET /api/releases/{version}/incidents", handler.HandleReleaseIncidents)
+	mux.HandleFunc("GET /api/stats/summary", handler.HandleStatsSummary)
+
+	for _, path := range []string{"/api/releases/1.0.0/incidents", "/api/stats/summary"} {
+		rec := httptest.NewRecorder()
+		mux.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, path, nil))
+		if rec.Code != http.StatusInternalServerError {
+			t.Errorf("%s: got %d, want 500", path, rec.Code)
+		}
 	}
 }

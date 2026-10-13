@@ -1,6 +1,10 @@
 package http
 
 import (
+	"bytes"
+	"context"
+	"encoding/json"
+	"errors"
 	"fmt"
 	"html/template"
 	"log"
@@ -8,10 +12,12 @@ import (
 	"net/url"
 	"strconv"
 	"strings"
+	"time"
 
 	"server/internal/delivery/sse"
 	"server/internal/domain"
 	"server/internal/pkg/github"
+	"server/internal/usecase"
 	"server/web"
 )
 
@@ -22,6 +28,9 @@ type UIHandler struct {
 	sseBroker    *sse.Broker
 	githubClient *github.Client
 	tmpl         *template.Template
+
+	githubAccounts domain.GitHubAccountRepository
+	githubService  *usecase.GitHubAccounts
 }
 
 func NewUIHandler(
@@ -30,10 +39,19 @@ func NewUIHandler(
 	releaseRepo domain.ReleaseRepository,
 	sseBroker *sse.Broker,
 ) (*UIHandler, error) {
-	// Parse all templates from embedded FS with helper functions
 	funcMap := template.FuncMap{
-		"trim":         strings.TrimSpace,
-		"filterVendor": domain.FilterVendorStackTrace,
+		"trim":     strings.TrimSpace,
+		"join":     strings.Join,
+		"ctxValue": ctxValue,
+		"yesNo": func(b *bool) string {
+			if b == nil {
+				return "—"
+			}
+			if *b {
+				return "Да"
+			}
+			return "Нет"
+		},
 		"host": func(rawURL string) string {
 			rawURL = strings.TrimSpace(rawURL)
 			if rawURL == "" {
@@ -48,6 +66,53 @@ func NewUIHandler(
 			}
 			return u.Host
 		},
+		"urlPath": func(rawURL string) string {
+			u, err := url.Parse(strings.TrimSpace(rawURL))
+			if err != nil || u.Path == "" {
+				return rawURL
+			}
+			return u.Path
+		},
+		"baseName": baseName,
+		"plural":   plural,
+		"dict":     dict,
+		"namespace": func(s string) string {
+			return strings.TrimSuffix(s, baseName(s))
+		},
+		"formatBytes": func(b int64) string {
+			if b <= 0 {
+				return "0 B"
+			}
+			const unit = 1024
+			if b < unit {
+				return fmt.Sprintf("%d B", b)
+			}
+			div, exp := int64(unit), 0
+			for n := b / unit; n >= unit; n /= unit {
+				div *= unit
+				exp++
+			}
+			return fmt.Sprintf("%.1f %cB", float64(b)/float64(div), "KMGTPE"[exp])
+		},
+		"formatDuration": func(ms float64) string {
+			if ms <= 0 {
+				return "0 ms"
+			}
+			if ms < 1000 {
+				return fmt.Sprintf("%.1f ms", ms)
+			}
+			return fmt.Sprintf("%.2f s", ms/1000)
+		},
+		"jsonPretty": jsonPretty,
+		"formatTimestamp": func(ts float64) string {
+			if ts <= 0 {
+				return ""
+			}
+			sec := int64(ts)
+			nsec := int64((ts - float64(sec)) * 1e9)
+			t := time.Unix(sec, nsec)
+			return t.Format("15:04:05.000")
+		},
 	}
 	tmpl, err := template.New("").Funcs(funcMap).ParseFS(
 		web.TemplatesFS,
@@ -56,6 +121,7 @@ func NewUIHandler(
 		"templates/partials/incident_rows.html",
 		"templates/partials/incident_row.html",
 		"templates/partials/incident_detail.html",
+		"templates/github.html",
 	)
 	if err != nil {
 		return nil, fmt.Errorf("failed to parse templates: %w", err)
@@ -72,55 +138,83 @@ func NewUIHandler(
 	return h, nil
 }
 
-// SetGitHubClient sets the GitHub API client for fetching file snippets
 func (h *UIHandler) SetGitHubClient(client *github.Client) {
 	h.githubClient = client
 }
 
-// GetRowTemplate returns the parsed single row template for SSE broadcasting
-func (h *UIHandler) GetRowTemplate() *template.Template {
-	return h.tmpl.Lookup("incident_row.html")
+// parseListFilter читает фильтры списка, общие для страницы и HTMX-партиала.
+func parseListFilter(r *http.Request) domain.IncidentFilter {
+	q := r.URL.Query()
+	filter := domain.IncidentFilter{
+		Query:  strings.TrimSpace(q.Get("q")),
+		Status: q.Get("status"),
+		Sort:   q.Get("sort"),
+		Limit:  100,
+	}
+	if filter.Status == "" {
+		filter.Status = "unresolved"
+	}
+	if filter.Sort == "" {
+		filter.Sort = "recent"
+	}
+	filter.ProjectID, _ = strconv.ParseInt(q.Get("project_id"), 10, 64)
+	return filter
 }
 
-// HandleIndex renders the main dashboard page (/ui)
+// listData собирает строки и счётчики сегментов по статусам для выбранного проекта.
+func (h *UIHandler) listData(ctx context.Context, filter domain.IncidentFilter) (map[string]interface{}, error) {
+	incidents, err := h.incidentRepo.GetIncidents(ctx, filter)
+	if err != nil {
+		return nil, err
+	}
+	totalIncidents, _ := h.incidentRepo.CountIncidents(ctx, filter.ProjectID, "all")
+	totalUnresolved, _ := h.incidentRepo.CountIncidents(ctx, filter.ProjectID, "unresolved")
+	totalResolved, _ := h.incidentRepo.CountIncidents(ctx, filter.ProjectID, "resolved")
+	return map[string]interface{}{
+		"Incidents":       incidents,
+		"TotalIncidents":  totalIncidents,
+		"TotalUnresolved": totalUnresolved,
+		"TotalResolved":   totalResolved,
+		"SelectedStatus":  filter.Status,
+	}, nil
+}
+
+// HandleIndex рендерит главную страницу дашборда (/ui).
 func (h *UIHandler) HandleIndex(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
+	filter := parseListFilter(r)
+
+	data, err := h.listData(ctx, filter)
+	if err != nil {
+		log.Printf("Error getting incidents: %v", err)
+		data = map[string]interface{}{"SelectedStatus": filter.Status}
+	}
 
 	projects, err := h.projectRepo.GetAllProjects(ctx)
 	if err != nil {
 		log.Printf("Error getting projects: %v", err)
 	}
-
-	status := r.URL.Query().Get("status")
-	if status == "" {
-		status = "unresolved"
-	}
-
-	filter := domain.IncidentFilter{
-		Limit:  100,
-		Sort:   "recent",
-		Status: status,
-	}
-
-	incidents, err := h.incidentRepo.GetIncidents(ctx, filter)
+	projectCounts, err := h.incidentRepo.CountByProject(ctx)
 	if err != nil {
-		log.Printf("Error getting incidents: %v", err)
+		log.Printf("Error counting incidents by project: %v", err)
+	}
+	// Пустая карта, а не nil: шаблон выводит её в JSON, и null сломал бы чтение релизов в JS
+	latestReleases := map[int64]string{}
+	if h.releaseRepo != nil {
+		if versions, err := h.releaseRepo.LatestVersions(ctx); err != nil {
+			log.Printf("Error getting latest releases: %v", err)
+		} else {
+			latestReleases = versions
+		}
 	}
 
-	totalIncidents, _ := h.incidentRepo.CountIncidents(ctx, 0, "all")
-	totalUnresolved, _ := h.incidentRepo.CountIncidents(ctx, 0, "unresolved")
-	totalResolved, _ := h.incidentRepo.CountIncidents(ctx, 0, "resolved")
-
-	data := map[string]interface{}{
-		"Projects":          projects,
-		"Incidents":         incidents,
-		"TotalIncidents":    totalIncidents,
-		"TotalUnresolved":   totalUnresolved,
-		"TotalResolved":     totalResolved,
-		"SelectedProjectID": int64(0),
-		"SelectedStatus":    status,
-		"Query":             "",
-	}
+	data["Projects"] = projects
+	data["ProjectCounts"] = projectCounts
+	data["LatestReleases"] = latestReleases
+	data["GitHubRepoGroups"] = h.selectedRepoGroups(ctx)
+	data["SelectedProjectID"] = filter.ProjectID
+	data["SelectedSort"] = filter.Sort
+	data["Query"] = filter.Query
 
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
 	if err := h.tmpl.ExecuteTemplate(w, "index.html", data); err != nil {
@@ -129,44 +223,15 @@ func (h *UIHandler) HandleIndex(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
-// HandleIncidents returns filtered incident rows (HTMX partial)
+// HandleIncidents возвращает отфильтрованные строки инцидентов и out-of-band счётчики сегментов (HTMX-партиал).
 func (h *UIHandler) HandleIncidents(w http.ResponseWriter, r *http.Request) {
-	ctx := r.Context()
-
-	q := strings.TrimSpace(r.URL.Query().Get("q"))
-	sort := r.URL.Query().Get("sort")
-	if sort == "" {
-		sort = "recent"
-	}
-
-	status := r.URL.Query().Get("status")
-	if status == "" {
-		status = "unresolved"
-	}
-
-	var projectID int64
-	if projStr := r.URL.Query().Get("project_id"); projStr != "" {
-		projectID, _ = strconv.ParseInt(projStr, 10, 64)
-	}
-
-	filter := domain.IncidentFilter{
-		ProjectID: projectID,
-		Query:     q,
-		Status:    status,
-		Sort:      sort,
-		Limit:     100,
-	}
-
-	incidents, err := h.incidentRepo.GetIncidents(ctx, filter)
+	data, err := h.listData(r.Context(), parseListFilter(r))
 	if err != nil {
 		log.Printf("Error searching incidents: %v", err)
 		http.Error(w, "Failed to load incidents", http.StatusInternalServerError)
 		return
 	}
-
-	data := map[string]interface{}{
-		"Incidents": incidents,
-	}
+	data["OOB"] = true
 
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
 	if err := h.tmpl.ExecuteTemplate(w, "incident_rows.html", data); err != nil {
@@ -175,7 +240,7 @@ func (h *UIHandler) HandleIncidents(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
-// HandleIncidentDetail returns drawer content or handles resolve/reopen actions
+// HandleIncidentDetail возвращает содержимое drawer или обрабатывает действия resolve/reopen.
 func (h *UIHandler) HandleIncidentDetail(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
 
@@ -191,44 +256,41 @@ func (h *UIHandler) HandleIncidentDetail(w http.ResponseWriter, r *http.Request)
 		return
 	}
 
-	// Handle action subpaths: /ui/incidents/{id}/resolve or /ui/incidents/{id}/reopen
 	if len(pathParts) >= 4 {
-		action := pathParts[3]
-		if action == "resolve" && r.Method == http.MethodPost {
+		if r.Method != http.MethodPost {
+			http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+			return
+		}
+		var actionErr error
+		switch action := pathParts[3]; action {
+		case "resolve":
 			resType := r.FormValue("type")
 			if resType == "" {
 				resType = "immediate"
 			}
-			version := r.FormValue("version")
-			if err := h.incidentRepo.ResolveIncident(ctx, id, resType, version); err != nil {
-				log.Printf("Error resolving incident %d: %v", id, err)
-				http.Error(w, "Failed to resolve incident", http.StatusInternalServerError)
-				return
-			}
-			// Add HX-Trigger header so HTMX refreshes the main table counters
-			w.Header().Set("HX-Trigger", "incident-updated")
-		} else if action == "reopen" && r.Method == http.MethodPost {
-			if err := h.incidentRepo.ReopenIncident(ctx, id); err != nil {
-				log.Printf("Error reopening incident %d: %v", id, err)
-				http.Error(w, "Failed to reopen incident", http.StatusInternalServerError)
-				return
-			}
-			w.Header().Set("HX-Trigger", "incident-updated")
-		}
-
-		if r.URL.Query().Get("view") == "row" {
-			updatedInc, err := h.incidentRepo.GetIncidentByID(ctx, id)
+			actionErr = h.incidentRepo.ResolveIncident(ctx, id, resType, r.FormValue("version"))
+		case "reopen":
+			actionErr = h.incidentRepo.ReopenIncident(ctx, id)
+		case "restore":
+			state, err := parseIncidentState(r)
 			if err != nil {
-				http.Error(w, "Incident not found", http.StatusNotFound)
+				http.Error(w, err.Error(), http.StatusBadRequest)
 				return
 			}
-			w.Header().Set("Content-Type", "text/html; charset=utf-8")
-			if err := h.tmpl.ExecuteTemplate(w, "incident_row.html", updatedInc); err != nil {
-				log.Printf("Error rendering incident row: %v", err)
-				http.Error(w, "Internal Server Error", http.StatusInternalServerError)
-			}
+			actionErr = h.incidentRepo.RestoreIncidentState(ctx, id, state)
+		default:
+			http.NotFound(w, r)
 			return
 		}
+		if actionErr != nil {
+			log.Printf("Error applying %s to incident %d: %v", pathParts[3], id, actionErr)
+			http.Error(w, "Failed to update incident", http.StatusInternalServerError)
+			return
+		}
+		// incident-updated перезагружает список, счётчики и открытую шторку
+		w.Header().Set("HX-Trigger", "incident-updated")
+		w.WriteHeader(http.StatusNoContent)
+		return
 	}
 
 	incident, err := h.incidentRepo.GetIncidentByID(ctx, id)
@@ -260,14 +322,24 @@ func (h *UIHandler) HandleIncidentDetail(w http.ResponseWriter, r *http.Request)
 		issueURL = github.BuildIssueURL(project.GitHubRepo, title, body)
 	}
 
+	frames := domain.ParseFrames(incident.StackTrace)
+	vendorFrames := 0
+	for _, f := range frames {
+		if f.Vendor {
+			vendorFrames++
+		}
+	}
+
 	data := map[string]interface{}{
 		"Incident":      incident,
 		"Project":       project,
 		"CodeSnippet":   codeSnippet,
 		"IssueURL":      issueURL,
 		"LatestRelease": latestRelease,
-		"AppStackTrace": incident.AppStackTrace(),
-		"Stats":         incident.StackTraceStats(),
+		"StackGroups":   domain.GroupFrames(frames),
+		"CallGraph":     domain.BuildCallGraph(frames),
+		"VendorFrames":  vendorFrames,
+		"SnippetNote":   snippetNote(incident, frames),
 	}
 
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
@@ -277,7 +349,7 @@ func (h *UIHandler) HandleIncidentDetail(w http.ResponseWriter, r *http.Request)
 	}
 }
 
-// HandleEventsStream handles SSE connections from HTMX
+// HandleEventsStream обслуживает SSE-подключения от HTMX.
 func (h *UIHandler) HandleEventsStream(w http.ResponseWriter, r *http.Request) {
 	flusher, ok := w.(http.Flusher)
 	if !ok {
@@ -294,7 +366,7 @@ func (h *UIHandler) HandleEventsStream(w http.ResponseWriter, r *http.Request) {
 	h.sseBroker.Register(clientChan)
 	defer h.sseBroker.Unregister(clientChan)
 
-	// Send initial comment to establish SSE connection immediately
+	// Начальный комментарий нужен, чтобы SSE-соединение установилось сразу
 	fmt.Fprintf(w, ": connected\n\n")
 	flusher.Flush()
 
@@ -313,7 +385,7 @@ func (h *UIHandler) HandleEventsStream(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
-// HandleUpdateProjectGitHubSettings handles POST /ui/projects/github-settings
+// HandleUpdateProjectGitHubSettings обрабатывает POST /ui/projects/github-settings.
 func (h *UIHandler) HandleUpdateProjectGitHubSettings(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
 		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
@@ -331,25 +403,131 @@ func (h *UIHandler) HandleUpdateProjectGitHubSettings(w http.ResponseWriter, r *
 		return
 	}
 
-	repo := strings.TrimSpace(r.FormValue("github_repo"))
-	token := strings.TrimSpace(r.FormValue("github_token"))
+	repoID, err := strconv.ParseInt(r.FormValue("github_repo_id"), 10, 64)
+	if err != nil {
+		http.Error(w, "Invalid repository ID", http.StatusBadRequest)
+		return
+	}
 	branch := strings.TrimSpace(r.FormValue("github_branch"))
 	prefix := strings.TrimSpace(r.FormValue("path_prefix"))
 
-	// If token wasn't updated (empty in form submission), keep the existing token
-	if token == "" {
-		existing, err := h.projectRepo.GetByID(r.Context(), projectID)
-		if err == nil && existing != nil {
-			token = existing.GitHubToken
-		}
+	err = h.projectRepo.UpdateGitHubSettings(r.Context(), projectID, repoID, branch, prefix)
+	if errors.Is(err, domain.ErrGitHubRepoNotSelected) {
+		http.Error(w, err.Error(), http.StatusBadRequest)
+		return
 	}
-
-	if err := h.projectRepo.UpdateGitHubSettings(r.Context(), projectID, repo, token, branch, prefix); err != nil {
+	if err != nil {
 		log.Printf("Error updating github settings for project %d: %v", projectID, err)
 		http.Error(w, "Failed to update settings", http.StatusInternalServerError)
 		return
 	}
 
 	w.Header().Set("HX-Trigger", "github-settings-updated")
-	http.Redirect(w, r, "/ui", http.StatusSeeOther)
+	// Белый список, а не произвольный адрес из формы: иначе форма стала бы открытым редиректом
+	returnTo := "/ui"
+	if r.FormValue("return_to") == "/ui/github" {
+		returnTo = "/ui/github"
+	}
+	http.Redirect(w, r, returnTo, http.StatusSeeOther)
+}
+
+// baseName возвращает последний сегмент имени PHP-класса или пути к файлу.
+func baseName(s string) string {
+	return s[strings.LastIndexAny(s, `\/`)+1:]
+}
+
+// plural picks the Russian word form for n: plural(n, "ошибка", "ошибки", "ошибок").
+func plural(n int, one, few, many string) string {
+	switch m10, m100 := n%10, n%100; {
+	case m10 == 1 && m100 != 11:
+		return one
+	case m10 >= 2 && m10 <= 4 && (m100 < 12 || m100 > 14):
+		return few
+	default:
+		return many
+	}
+}
+
+// parseIncidentState проверяет состояние, которое UI сохранил до действия и теперь откатывает.
+func parseIncidentState(r *http.Request) (domain.IncidentState, error) {
+	state := domain.IncidentState{
+		Status:            domain.IncidentStatus(r.FormValue("status")),
+		IsRegression:      r.FormValue("is_regression") == "true",
+		ResolvedInRelease: strings.TrimSpace(r.FormValue("resolved_in_release")),
+	}
+	switch state.Status {
+	case domain.StatusUnresolved, domain.StatusResolved, domain.StatusIgnored:
+	default:
+		return state, fmt.Errorf("unknown status %q", state.Status)
+	}
+	if raw := r.FormValue("resolved_at"); raw != "" {
+		t, err := time.Parse(time.RFC3339Nano, raw)
+		if err != nil {
+			return state, fmt.Errorf("invalid resolved_at: %w", err)
+		}
+		state.ResolvedAt = &t
+	}
+	return state, nil
+}
+
+// snippetNote explains why the "Место ошибки" block has no source code.
+func snippetNote(inc *domain.Incident, frames []domain.StackFrame) string {
+	if strings.Contains(inc.File, "eval()'d code") {
+		return "Код выполнен в tinker через eval(), исходного файла нет."
+	}
+	if domain.IsVendorTraceLine(inc.File) {
+		for _, f := range frames {
+			if !f.Vendor && f.Line > 0 {
+				return fmt.Sprintf("Ошибка возникла внутри vendor. Ближайший кадр вашего кода: %s:%d.", f.FileName(), f.Line)
+			}
+		}
+		return "Ошибка возникла внутри vendor, кадров вашего кода в стеке нет."
+	}
+	return "Исходный код недоступен: клиент не прислал фрагмент, а репозиторий GitHub для проекта не привязан."
+}
+
+// ctxValue рендерит значение контекста приложения: строки как есть, остальное — JSON с отступами.
+func ctxValue(v any) string {
+	switch val := v.(type) {
+	case nil:
+		return "null"
+	case string:
+		return val
+	case map[string]any, []any:
+		return jsonPretty(val)
+	default:
+		return fmt.Sprint(val)
+	}
+}
+
+// jsonPretty рендерит v как JSON с отступом в два пробела.
+func jsonPretty(v any) string {
+	if v == nil {
+		return ""
+	}
+	var buf bytes.Buffer
+	enc := json.NewEncoder(&buf)
+	// html/template экранирует вывод сам; иначе & в URL показывается как &
+	enc.SetEscapeHTML(false)
+	enc.SetIndent("", "  ")
+	if err := enc.Encode(v); err != nil {
+		return fmt.Sprintf("%v", v)
+	}
+	return strings.TrimSuffix(buf.String(), "\n")
+}
+
+// dict собирает map из пар ключ/значение, чтобы передать несколько значений во вложенный шаблон.
+func dict(pairs ...any) (map[string]any, error) {
+	if len(pairs)%2 != 0 {
+		return nil, errors.New("dict: odd number of arguments")
+	}
+	m := make(map[string]any, len(pairs)/2)
+	for i := 0; i < len(pairs); i += 2 {
+		key, ok := pairs[i].(string)
+		if !ok {
+			return nil, fmt.Errorf("dict: key %v is not a string", pairs[i])
+		}
+		m[key] = pairs[i+1]
+	}
+	return m, nil
 }

@@ -27,8 +27,8 @@ class OrderController extends Controller
 `)
 
 	t.Run("Standard extraction with radius 3", func(t *testing.T) {
-		// Target line 14: "$total = $cart->items->sum('price');"
-		// Radius 3: lines 11 to 17
+		// Строка 14 — та, где ошибка: "$total = $cart->items->sum('price');"
+		// Радиус 3: строки с 11 по 17
 		lines := ExtractSnippet(sampleFile, 14, 3)
 		if len(lines) != 7 {
 			t.Fatalf("expected 7 lines, got %d", len(lines))
@@ -41,7 +41,6 @@ class OrderController extends Controller
 			t.Errorf("expected last line number 17, got %d", lines[len(lines)-1].Number)
 		}
 
-		// Find the error line
 		var foundError bool
 		for _, l := range lines {
 			if l.Number == 14 {

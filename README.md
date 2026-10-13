@@ -20,7 +20,7 @@ DB_PATH=/app/data/tracker.db
 TG_BOT_TOKEN=your-telegram-bot-token
 TG_CHAT_ID=your-chat-id
 ALERT_INTERVAL=5m
-ALLOWED_IPS=127.0.0.1,192.168.1.1 # Опционально: разрешенные IP-адреса через запятую
+ALLOWED_IPS=203.0.113.10 # IP, которым открыт /api/*, через запятую; пусто — только с хоста, где запущен сервис
 ```
 3. Start the server:
 ```bash
@@ -34,47 +34,92 @@ The SQLite database will be persisted in the `./data` directory on your host mac
 ### 1. Receive Error (POST)
 `POST /api/events`
 
-Used by the Laravel client to push errors. Requires `Authorization: Bearer <API_KEY>`.
+Used by Laravel clients to push errors. API-ключи не требуются — проект регистрируется и определяется автоматически:
+- В теле запроса: `"project": "my-app"` (или `"project_name"`)
+- Либо через заголовок: `X-Project: my-app`
+- Либо через query-параметр: `?project=my-app`
+- Если имя не передано, событие сохраняется в `Default Project`.
+*(Для обратной совместимости также поддерживается `Authorization: Bearer <API_KEY>`)*.
 
 ### 2. List Errors (GET)
 `GET /api/incidents`
 
-Returns a JSON array of the latest errors for a specific project. Requires `Authorization: Bearer <API_KEY>`.
+Возвращает список инцидентов. Поддерживает фильтрацию по проекту: `?project=my-app` или `?project_id=1`. Без параметров возвращает инциденты всех проектов.
 
 ## CI/CD и автодеплой (GitHub Actions)
 
-В проекте настроен пайплайн автоматического тестирования и деплоя (`.github/workflows/deploy.yml`):
-- При создании Pull Request или Push в `main` запускаются тесты (`go test ./...`) и валидация сборки.
-- При успешном прохождении тестов на ветке `main` (или ручном запуске через `workflow_dispatch`) происходит автоматический деплой на сервер по SSH с пересборкой контейнеров Docker Compose.
+Пайплайн `.github/workflows/deploy.yml`:
+- **test** — на каждый PR и push в `main`: `go mod verify`, `go test ./...`, проверка сборки.
+- **build** — на push в `main` (и `workflow_dispatch`): статический бинарник `linux/amd64`, артефакт хранится 14 дней.
+- **deploy** — окружение `production`: копирует бинарник и `deploy/deploy.sh` на сервер по SSH и запускает скрипт.
 
-### Необходимые GitHub Secrets
+`deploy/deploy.sh` на сервере останавливает сервис, кладёт бинарник и `tracker.db*` в `~/backups/<дата>/` (хранит 5 последних), подменяет бинарник, запускает сервис и 15 секунд ждёт `/api/health`. Не поднялся — возвращает бинарник и базу из бэкапа, и job падает.
 
-В репозитории GitHub перейдите в **Settings** -> **Secrets and variables** -> **Actions** и добавьте следующие секреты:
+### Сервер
 
-| Секрет | Описание | Обязательный |
-|---|---|---|
-| `SERVER_HOST` | IP-адрес или домен вашего сервера (например, `194.87.12.34`) | Да |
-| `SERVER_USER` | Пользователь для подключения по SSH (например, `root` или `ubuntu`) | Да |
-| `SERVER_SSH_KEY` | Приватный SSH-ключ для авторизации (содержимое `~/.ssh/id_ed25519` или `~/.ssh/id_rsa`) | Да (если используется ключ) |
-| `SERVER_PASSWORD` | Пароль пользователя SSH (если авторизация по паролю вместо ключа) | Опционально |
-| `SERVER_PATH` | Абсолютный путь к папке проекта на сервере (например, `/opt/larasentry-server`) | Да |
-| `SERVER_PORT` | Порт SSH (по умолчанию `22`) | Опционально |
-| `SERVER_PASSPHRASE` | Пароль от приватного SSH-ключа (если ключ зашифрован) | Опционально |
+Сервис работает как systemd-юнит от пользователя `larasentry`, всё лежит в его домашней папке:
 
-### Первичная подготовка сервера
+```ini
+# /etc/systemd/system/larasentry.service
+[Unit]
+Description=Larasentry Server
+After=network.target
 
-1. Склонируйте репозиторий в нужную директорию на сервере:
+[Service]
+Type=simple
+User=larasentry
+WorkingDirectory=/home/larasentry
+ExecStart=/home/larasentry/larasentry-server
+Restart=always
+RestartSec=3
+EnvironmentFile=/home/larasentry/.env
+
+[Install]
+WantedBy=multi-user.target
+```
+
+Разовая настройка (под пользователем с sudo):
+
+1. Разрешить `larasentry` останавливать и запускать только свой сервис:
    ```bash
-   git clone git@github.com:Manzadey/larasentry-server.git /opt/larasentry-server
-   cd /opt/larasentry-server
+   echo 'larasentry ALL=(root) NOPASSWD: /usr/bin/systemctl stop larasentry, /usr/bin/systemctl start larasentry, /usr/bin/systemctl restart larasentry' | sudo tee /etc/sudoers.d/larasentry
+   sudo chmod 440 /etc/sudoers.d/larasentry && sudo visudo -cf /etc/sudoers.d/larasentry
    ```
-2. Создайте файл `.env` с боевыми настройками:
-   ```bash
-   cp .env.example .env
-   nano .env
-   ```
-3. Убедитесь, что публичный SSH-ключ раннера GitHub добавлен в `~/.ssh/authorized_keys` на сервере.
-4. Убедитесь, что Docker и Docker Compose установлены и запущены.
+2. В `~larasentry/.env` — `LISTEN_ADDR=127.0.0.1:8080` (порт не виден соседям по сети, только nginx) и `ALLOWED_IPS`.
+3. Заполнить переменные в `scripts/gh-secrets.sh` и запустить `bash scripts/gh-secrets.sh`: он создаст ключ для CI, окружение `production` с секретами и напечатает строку для `~larasentry/.ssh/authorized_keys`.
+
+### nginx перед сервисом
+
+`/api/*` закрыт списком `ALLOWED_IPS`, а UI и Swagger — basic auth на nginx. Basic auth нельзя вешать на `/api/`: Laravel-клиенты перестанут отправлять события.
+
+```nginx
+location /api/ {
+    proxy_pass http://127.0.0.1:8080;
+    # Обязательно: сервис доверяет заголовку от nginx на своём хосте. Без него все запросы
+    # через nginx выглядят как запросы с хоста и проходят ALLOWED_IPS
+    proxy_set_header X-Real-IP $remote_addr;
+    # Иначе nginx копит поток событий (SSE) в буфере
+    proxy_buffering off;
+}
+
+location / {
+    auth_basic "LaraSentry";
+    auth_basic_user_file /etc/nginx/.htpasswd;
+    proxy_pass http://127.0.0.1:8080;
+    proxy_set_header X-Real-IP $remote_addr;
+    proxy_buffering off;
+}
+```
+
+Файл паролей: `htpasswd -c /etc/nginx/.htpasswd admin` (пакет `apache2-utils`).
+
+Если перед nginx стоит ещё один прокси (TLS снимается на другой машине), nginx видит адрес прокси, а не клиента, и `ALLOWED_IPS` теряет смысл. Тогда в `server` нужно взять адрес клиента из заголовка внешнего прокси:
+
+```nginx
+set_real_ip_from 10.10.10.2;          # адрес внешнего прокси
+real_ip_header X-Forwarded-For;       # или X-Real-IP — какой он передаёт
+real_ip_recursive on;
+```
 
 ## License
 MIT License

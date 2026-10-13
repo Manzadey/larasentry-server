@@ -6,8 +6,8 @@ import (
 	"server/internal/domain"
 )
 
-// ExtractSnippet splits the raw file content into lines and returns a window of code lines
-// surrounding the targetLine with the given radius.
+// ExtractSnippet разбивает содержимое файла на строки и возвращает окно строк кода
+// вокруг targetLine с заданным радиусом.
 func ExtractSnippet(rawContent string, targetLine int, radius int) []domain.CodeLine {
 	if rawContent == "" || targetLine <= 0 {
 		return nil
