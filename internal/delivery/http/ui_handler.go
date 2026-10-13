@@ -41,6 +41,7 @@ func NewUIHandler(
 ) (*UIHandler, error) {
 	funcMap := template.FuncMap{
 		"trim":     strings.TrimSpace,
+		"static":   web.StaticURL,
 		"join":     strings.Join,
 		"ctxValue": ctxValue,
 		"yesNo": func(b *bool) string {
